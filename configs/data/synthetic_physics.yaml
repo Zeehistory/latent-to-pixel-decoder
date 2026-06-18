@@ -1,0 +1,10 @@
+name: synthetic_physics
+root: null
+image_size: 64
+num_frames: 16
+fps: 8
+categories: all
+split: train
+num_clips: 64
+scenarios: [bouncing_ball, projectile, collision, pendulum, occlusion]
+seed: 0

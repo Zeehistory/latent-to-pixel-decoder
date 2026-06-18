@@ -1,0 +1,255 @@
+"""Latent extraction, caching, and reading.
+
+Runs a frozen encoder over a dataset and writes latents to disk so decoder/probe training never reruns
+the encoder. Storage format (dependency-light, WebDataset-compatible layout):
+
+    <out>/
+      shard_00000.tar         # tar of per-sample `<id>.pt` tensors (torch.save)
+      shard_00001.tar
+      metadata.parquet        # one row per sample: id, shard, category, grid, layers, state info
+      checksums.json          # sha256 per shard (integrity / provenance)
+      extract_meta.json       # encoder id, config, commit, preprocessing, layer indices
+
+Each per-sample `.pt` is a dict:
+    {"id", "layers": {idx: (L, D) tensor}, "grid": (T', Hp, Wp), "state": (T, S), "state_mask": (S,),
+     "state_keys": [...], "category": str}
+
+This is read back by :class:`LatentDataset` for training and by the analysis modules.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import tarfile
+from pathlib import Path
+from typing import Any
+
+import torch
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
+from ..data.dataset_registry import collate
+from .base import EncoderWrapper
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class LatentShardWriter:
+    """Accumulates per-sample tensors and flushes them into ``.tar`` shards."""
+
+    def __init__(self, out_dir: str | Path, shard_size: int = 64) -> None:
+        self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.shard_size = shard_size
+        self._buf: list[tuple[str, dict[str, Any]]] = []
+        self._shard_idx = 0
+        self.records: list[dict[str, Any]] = []
+        self.checksums: dict[str, str] = {}
+
+    def add(self, sample_id: str, payload: dict[str, Any], record: dict[str, Any]) -> None:
+        self._buf.append((sample_id, payload))
+        record["shard"] = f"shard_{self._shard_idx:05d}.tar"
+        self.records.append(record)
+        if len(self._buf) >= self.shard_size:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._buf:
+            return
+        shard_path = self.out_dir / f"shard_{self._shard_idx:05d}.tar"
+        with tarfile.open(shard_path, "w") as tar:
+            for sample_id, payload in self._buf:
+                buf = io.BytesIO()
+                torch.save(payload, buf)
+                data = buf.getvalue()
+                info = tarfile.TarInfo(name=f"{sample_id}.pt")
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        self.checksums[shard_path.name] = _sha256(shard_path)
+        self._buf.clear()
+        self._shard_idx += 1
+
+    def close(self, extract_meta: dict[str, Any]) -> None:
+        self._flush()
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.Table.from_pylist([_jsonify(r) for r in self.records])
+        pq.write_table(table, self.out_dir / "metadata.parquet")
+        (self.out_dir / "checksums.json").write_text(json.dumps(self.checksums, indent=2))
+        (self.out_dir / "extract_meta.json").write_text(json.dumps(extract_meta, indent=2))
+
+
+def _jsonify(rec: dict[str, Any]) -> dict[str, Any]:
+    out = {}
+    for k, v in rec.items():
+        out[k] = list(v) if isinstance(v, tuple) else v
+    return out
+
+
+@torch.no_grad()
+def extract_latents(
+    encoder: EncoderWrapper,
+    dataset: Dataset,
+    out_dir: str | Path,
+    layers: Any = "all",
+    extract_attention: bool = False,
+    batch_size: int = 4,
+    num_workers: int = 0,
+    device: torch.device | str = "cpu",
+    shard_size: int = 64,
+    store_frames_size: int | None = None,
+    extract_meta: dict[str, Any] | None = None,
+) -> Path:
+    """Run ``encoder`` over ``dataset`` and write latent shards to ``out_dir``. Returns ``out_dir``.
+
+    The original (un-normalized) frames are stored alongside the latents so the latent cache is
+    self-contained for reconstruction training. ``store_frames_size`` optionally downsamples the stored
+    target frames to bound cache size; ``None`` keeps the dataset's native resolution.
+    """
+    import torch.nn.functional as F
+    encoder = encoder.to(device)
+    encoder.freeze()
+    loader = DataLoader(
+        dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=collate, shuffle=False
+    )
+    writer = LatentShardWriter(out_dir, shard_size=shard_size)
+    layer_indices: list[int] | None = None
+
+    for batch in tqdm(loader, desc="extract latents"):
+        video = batch["encoder_input"].to(device)
+        bundle = encoder.encode(video, layers=layers, extract_attention=extract_attention)
+        layer_indices = bundle.layer_indices
+        b = video.shape[0]
+        frames = batch["frames"]
+        if store_frames_size is not None:
+            t = frames.shape[1]
+            frames = F.interpolate(
+                frames.flatten(0, 1), size=(store_frames_size, store_frames_size),
+                mode="bilinear", align_corners=False,
+            ).reshape(frames.shape[0], t, frames.shape[2], store_frames_size, store_frames_size)
+        for i in range(b):
+            sample_layers = {li: bundle.layers[li][i].cpu().clone() for li in bundle.layer_indices}
+            payload = {
+                "id": batch["id"][i],
+                "layers": sample_layers,
+                "frames": frames[i].cpu().clone(),
+                "grid": (bundle.grid.temporal, bundle.grid.height, bundle.grid.width),
+                "state": batch["state"][i].cpu().clone(),
+                "state_mask": batch["state_mask"][i].cpu().clone(),
+                "state_keys": batch["state_keys"],
+                "category": batch["category"][i],
+            }
+            record = {
+                "id": batch["id"][i],
+                "category": batch["category"][i],
+                "temporal": bundle.grid.temporal,
+                "height": bundle.grid.height,
+                "width": bundle.grid.width,
+                "hidden_dim": bundle.hidden_dim,
+                "layers": list(bundle.layer_indices),
+                "state_dim": int(batch["state"][i].shape[-1]),
+                "state_valid": bool(batch["state_mask"][i].sum() > 0),
+            }
+            writer.add(batch["id"][i], payload, record)
+
+    meta = {
+        "encoder": getattr(encoder, "model_id", encoder.__class__.__name__),
+        "hidden_dim": encoder.hidden_dim,
+        "num_layers": encoder.num_layers,
+        "layer_indices": layer_indices,
+        "extract_attention": extract_attention,
+    }
+    if extract_meta:
+        meta.update(extract_meta)
+    writer.close(meta)
+    return Path(out_dir)
+
+
+class LatentDataset(Dataset):
+    """Reads latent shards written by :func:`extract_latents`.
+
+    Parameters
+    ----------
+    root: directory containing ``metadata.parquet`` and ``shard_*.tar``.
+    layers: which layer indices to return (``"all"`` or a list). Selecting fewer layers saves memory
+        for single-layer decoder/probe experiments.
+    """
+
+    def __init__(self, root: str | Path, layers: Any = "all") -> None:
+        import pyarrow.parquet as pq
+
+        self.root = Path(root)
+        meta_path = self.root / "metadata.parquet"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"No metadata.parquet under {self.root}; run extract_latents first.")
+        self.records = pq.read_table(meta_path).to_pylist()
+        self.layers = layers
+        # Map sample id -> (shard, member) and cache opened shards lazily.
+        self._index = {r["id"]: r["shard"] for r in self.records}
+        self._ids = [r["id"] for r in self.records]
+        self._shard_cache: dict[str, dict[str, Any]] = {}
+
+    def __len__(self) -> int:
+        return len(self._ids)
+
+    def available_layers(self) -> list[int]:
+        return list(self.records[0]["layers"])
+
+    def _load_shard(self, shard: str) -> dict[str, Any]:
+        if shard in self._shard_cache:
+            return self._shard_cache[shard]
+        samples: dict[str, Any] = {}
+        with tarfile.open(self.root / shard, "r") as tar:
+            for member in tar.getmembers():
+                f = tar.extractfile(member)
+                assert f is not None
+                payload = torch.load(io.BytesIO(f.read()), map_location="cpu", weights_only=False)
+                samples[payload["id"]] = payload
+        self._shard_cache[shard] = samples
+        return samples
+
+    def _select_layers(self, payload: dict[str, Any]) -> dict[int, torch.Tensor]:
+        if self.layers == "all" or self.layers is None:
+            return payload["layers"]
+        want = [int(x) for x in self.layers]
+        return {li: payload["layers"][li] for li in want}
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        sid = self._ids[idx]
+        payload = self._load_shard(self._index[sid])[sid]
+        layers = self._select_layers(payload)
+        return {
+            "id": sid,
+            "layers": layers,
+            "frames": payload["frames"],
+            "grid": payload["grid"],
+            "state": payload["state"],
+            "state_mask": payload["state_mask"],
+            "state_keys": payload["state_keys"],
+            "category": payload["category"],
+        }
+
+
+def latent_collate(batch: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collate latent samples: stack per-layer token tensors and state."""
+    layer_keys = sorted(batch[0]["layers"].keys())
+    out: dict[str, Any] = {
+        "id": [b["id"] for b in batch],
+        "category": [b["category"] for b in batch],
+        "grid": batch[0]["grid"],
+        "state_keys": batch[0]["state_keys"],
+        "layers": {li: torch.stack([b["layers"][li] for b in batch], 0) for li in layer_keys},
+        "frames": torch.stack([b["frames"] for b in batch], 0),
+        "state": torch.stack([b["state"] for b in batch], 0),
+        "state_mask": torch.stack([b["state_mask"] for b in batch], 0),
+    }
+    return out

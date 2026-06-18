@@ -1,0 +1,9 @@
+# Set `root` to the downloaded Physics-IQ directory (see scripts/download_data.py).
+name: physics_iq
+root: null
+image_size: 256
+num_frames: 16
+fps: 8
+categories: all
+split: train
+seed: 0

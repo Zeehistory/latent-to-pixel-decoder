@@ -1,0 +1,9 @@
+# DROID robotics (Stage-2 stub). Loader raises NotImplementedError until wired.
+name: droid
+root: null
+image_size: 224
+num_frames: 16
+fps: 15
+categories: all
+split: train
+seed: 0

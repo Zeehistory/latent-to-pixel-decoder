@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+*.whl
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Project artifacts (do not commit large data / runs)
+outputs/
+data/raw/
+data/processed/
+*.tar
+*.zarr/
+*.h5
+*.hdf5
+*.parquet
+*.mp4
+*.npy
+*.npz
+*.ckpt
+*.pt
+*.pth
+wandb/
+
+# OS
+.DS_Store

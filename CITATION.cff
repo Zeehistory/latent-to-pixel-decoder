@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "vjepa-physics-decoder: Decoding and Interpreting Physics in Frozen V-JEPA Video Representations"
+authors:
+  - family-names: "Contributors"
+    given-names: "vjepa-physics-decoder"
+version: 0.1.0
+date-released: 2026-06-17
+license: Apache-2.0
+repository-code: "https://github.com/your-org/vjepa-physics-decoder"
+keywords:
+  - V-JEPA
+  - world models
+  - video representation learning
+  - physical reasoning
+  - interpretability
+references:
+  - type: article
+    title: "Revisiting Feature Prediction for Learning Visual Representations from Video (V-JEPA)"
+    authors:
+      - name: "Meta AI"
+    year: 2024
+  - type: article
+    title: "V-JEPA 2: Self-Supervised Video Models for Understanding and Prediction"
+    authors:
+      - name: "Meta AI"
+    year: 2025
