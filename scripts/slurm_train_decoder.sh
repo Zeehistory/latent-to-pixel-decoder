@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=vjepa_train
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=256G
-#SBATCH --time=48:00:00
+#SBATCH --partition=gpu_rtx6000
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=24:00:00
 #SBATCH --output=logs/train_%j.out
 #SBATCH --error=logs/train_%j.err
 

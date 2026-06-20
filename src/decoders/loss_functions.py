@@ -43,6 +43,7 @@ def ssim(pred: torch.Tensor, target: torch.Tensor, window_size: int = 7) -> torc
     p = pred.reshape(b * t, c, h, w)
     g = target.reshape(b * t, c, h, w)
     win = _gaussian_window(window_size, 1.5, c, pred.device)
+    p, g = p.float(), g.float()
     pad = window_size // 2
     mu_p = F.conv2d(p, win, padding=pad, groups=c)
     mu_g = F.conv2d(g, win, padding=pad, groups=c)
@@ -157,8 +158,8 @@ def lpips_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return pred.new_zeros(())
     net = net.to(pred.device)
     b, t, c, h, w = pred.shape
-    p = pred.reshape(b * t, c, h, w) * 2 - 1
-    g = target.reshape(b * t, c, h, w) * 2 - 1
+    p = pred.reshape(b * t, c, h, w).float() * 2 - 1
+    g = target.reshape(b * t, c, h, w).float() * 2 - 1
     return net(p, g).mean()
 
 
@@ -198,7 +199,8 @@ class DecoderLoss(torch.nn.Module):
             add("charbonnier", c.charbonnier, charbonnier_loss(pred_frames, target_frames))
             add("ssim", c.ssim, ssim_loss(pred_frames, target_frames))
             add("ms_ssim", c.ms_ssim, ms_ssim_loss(pred_frames, target_frames))
-            add("lpips", c.lpips, lpips_loss(pred_frames, target_frames))
+            if c.lpips != 0.0:
+                add("lpips", c.lpips, lpips_loss(pred_frames, target_frames))
             add("temporal", c.temporal_consistency, temporal_consistency_loss(pred_frames, target_frames))
 
         if pred_state is not None and target_state is not None and state_keys is not None:

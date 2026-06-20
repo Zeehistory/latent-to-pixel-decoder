@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=vjepa_extract
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu_rtx6000
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=4:00:00
+#SBATCH --time=3:00:00
 #SBATCH --output=logs/extract_%j.out
 #SBATCH --error=logs/extract_%j.err
 

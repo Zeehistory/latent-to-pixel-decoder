@@ -42,27 +42,30 @@ loss:
   charbonnier: 1.0
   ssim: 0.25
   ms_ssim: 0.25
-  lpips: 0.5
+  lpips: 0.0
   temporal_consistency: 0.5
 
 optim:
   lr: 2.0e-4
   weight_decay: 0.05
+  betas: [0.9, 0.999]
   warmup_steps: 2000
   max_steps: 200000
   scheduler: cosine
   grad_accum: 4
+  grad_clip: 1.0
   ema_decay: 0.9999
 
 train:
-  batch_size: 8
-  num_workers: 8
+  batch_size: 2
+  num_workers: 2
   mixed_precision: bf16
   log_every: 50
   ckpt_every: 2000
   eval_every: 5000
   seed: 0
   deterministic: false
+  resume: null
 
 output_dir: outputs/runs/physics_iq_decoder_large
 latent_dir: outputs/latents/physics_iq/vjepa2_large

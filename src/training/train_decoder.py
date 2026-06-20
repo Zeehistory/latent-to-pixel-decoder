@@ -81,7 +81,7 @@ def train_decoder(cfg: DictConfig) -> dict[str, Any]:
 
     if accelerator.is_main_process:
         save_config(cfg, out_dir / "resolved_config.yaml")
-        write_run_metadata(out_dir, {"experiment": "train_decoder", "decoder_params": decoder.num_parameters()})
+        write_run_metadata(out_dir, {"experiment": "train_decoder", "decoder_params": accelerator.unwrap_model(decoder).num_parameters()})
     jsonl = JSONLLogger(out_dir / "metrics.jsonl") if accelerator.is_main_process else None
 
     decoder.train()
@@ -127,7 +127,7 @@ def train_decoder(cfg: DictConfig) -> dict[str, Any]:
         if jsonl:
             jsonl.close()
     accelerator.wait_for_everyone()
-    return {"checkpoint": str(last_ckpt), "steps": step, "decoder_params": decoder.num_parameters()}
+    return {"checkpoint": str(last_ckpt), "steps": step, "decoder_params": accelerator.unwrap_model(decoder).num_parameters()}
 
 
 def _cycle(loader: DataLoader):
