@@ -17,12 +17,17 @@ from __future__ import annotations
 
 import argparse
 import collections
+import importlib.util
 import shutil
 from pathlib import Path
 
-import _bootstrap  # noqa: F401
-
-from src.data.physics_iq_categories import category_for_id, scenario_for_id
+# Load the (pure-python, torch-free) category mapping directly by file path. Importing it via the
+# `src.data` package would pull in torch and get the process killed on memory-capped login nodes.
+_CAT_PATH = Path(__file__).resolve().parent.parent / "src" / "data" / "physics_iq_categories.py"
+_spec = importlib.util.spec_from_file_location("physics_iq_categories", _CAT_PATH)
+_piq = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_piq)  # type: ignore[union-attr]
+category_for_id, scenario_for_id = _piq.category_for_id, _piq.scenario_for_id
 
 
 def main() -> None:
