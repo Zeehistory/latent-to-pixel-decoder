@@ -10,16 +10,19 @@ regress quantities here (that is :mod:`train_probe`, Step 2). Instead we ask a s
 * Does an **MLP** classifier do better? The linear-vs-MLP gap measures how much category information is
   present but *non-linearly* entangled.
 
-Two controls keep the claim honest:
+Two methodological points that matter for Physics-IQ specifically:
 
-* **shuffled-label** — accuracy must collapse to the majority-class / chance rate.
-* **appearance baseline** — the same probe on raw pooled *pixels* (and on shallow encoder layers). If
-  shallow/pixel accuracy already matches deep-layer accuracy, the probe is reading appearance
-  (lighting, colour, camera) rather than physics. Genuine physics structure should be *more* decodable
-  in *deeper* layers — so we sweep all layers and look for accuracy that **rises with depth**.
+* **Scenario-grouped CV.** Each scenario appears as ~6 near-duplicate clips (3 perspectives x 2 takes).
+  Random CV would leak a scenario across train/test, so the probe memorises scenario *appearance* and
+  accuracy is inflated. We use scenario-grouped folds (StratifiedGroupKFold) so we measure
+  generalisation to *unseen scenarios*.
+* **Class imbalance / tiny classes.** Categories with fewer than ``min_scenarios_per_class`` distinct
+  scenarios cannot support valid grouped CV (Physics-IQ: magnetism=2, thermodynamics=3 scenarios) and
+  are dropped — but reported, never silently. ``majority_rate`` is the honest baseline to beat.
 
-Out-of-fold predictions (``cross_val_predict``) give an honest confusion matrix without a separate
-held-out split, which matters because Physics-IQ category counts are small.
+Controls: a **scenario-level shuffled-label** control (permute the category assigned to each whole
+scenario) must collapse to ~majority rate; and a pixel/appearance baseline (mean colour) plus the
+layerwise sweep test whether separability is physics (rises with depth) or appearance (flat near pixel).
 """
 
 from __future__ import annotations
@@ -30,55 +33,95 @@ from typing import Any
 
 import numpy as np
 
-from ..analysis.latent_geometry import pooled_features
+from ..data.physics_iq_categories import scenario_for_id
 from ..encoders.feature_extractor import LatentDataset
 
 
-def _pixel_features(latent_dir: str | Path) -> tuple[np.ndarray, list[str]]:
-    """Clip-level mean-pooled *pixel* features (appearance baseline) + category labels.
-
-    The latent cache stores the (downsampled) target frames alongside the latents, so we can build a
-    pure-appearance control without re-reading the source videos.
-    """
-    ds = LatentDataset(latent_dir, layers="all")
-    feats, cats = [], []
+def _load_pooled(latent_dir: str | Path, layer: int) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Clip-level mean-pooled latents ``(N, D)``, category labels, and sample ids for one layer."""
+    ds = LatentDataset(latent_dir, layers=[layer])
+    X, cats, ids = [], [], []
     for i in range(len(ds)):
         s = ds[i]
-        frames = s["frames"].numpy()  # (T, C, H, W) in [0, 1]
-        feats.append(frames.mean(axis=(0, 2, 3)))  # mean colour per channel -> crude appearance vector
+        X.append(s["layers"][layer].numpy().mean(0))
         cats.append(s["category"])
-    return np.stack(feats, 0), cats
+        ids.append(s["id"])
+    return np.stack(X, 0), np.asarray(cats), ids
 
 
-def _n_splits(labels: np.ndarray, requested: int = 5) -> int:
-    """Largest valid stratified-CV fold count (bounded by the smallest class)."""
-    _, counts = np.unique(labels, return_counts=True)
-    return int(max(2, min(requested, counts.min())))
+def _load_pixels(latent_dir: str | Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Clip-level mean-pooled *pixel* features (appearance baseline), labels, and ids."""
+    ds = LatentDataset(latent_dir, layers="all")
+    X, cats, ids = [], [], []
+    for i in range(len(ds)):
+        s = ds[i]
+        X.append(s["frames"].numpy().mean(axis=(0, 2, 3)))  # mean colour per channel
+        cats.append(s["category"])
+        ids.append(s["id"])
+    return np.stack(X, 0), np.asarray(cats), ids
+
+
+def _filter_classes(
+    X: np.ndarray, y: np.ndarray, groups: np.ndarray, min_groups: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], dict[str, int]]:
+    """Drop classes with fewer than ``min_groups`` distinct scenarios (can't support grouped CV)."""
+    keep, dropped = [], {}
+    for c in sorted(set(y.tolist())):
+        ng = len(set(groups[y == c].tolist()))
+        (keep.append(c) if ng >= min_groups else dropped.update({c: ng}))
+    mask = np.isin(y, keep)
+    return X[mask], y[mask], groups[mask], keep, dropped
+
+
+def _grouped_n_splits(y: np.ndarray, groups: np.ndarray, cap: int = 5) -> int:
+    """Largest valid fold count: bounded by the class with the fewest distinct scenarios."""
+    per_class = [len(set(groups[y == c].tolist())) for c in set(y.tolist())]
+    return int(max(2, min(cap, min(per_class))))
+
+
+def _group_shuffle(y: np.ndarray, groups: np.ndarray, seed: int) -> np.ndarray:
+    """Scenario-level label shuffle: permute the category assigned to each whole scenario."""
+    rng = np.random.default_rng(seed)
+    uniq = np.unique(groups)
+    glabel = np.array([y[groups == g][0] for g in uniq])
+    mapping = dict(zip(uniq, glabel[rng.permutation(len(uniq))]))
+    return np.array([mapping[g] for g in groups])
+
+
+def _predict_oof(model, X: np.ndarray, y: np.ndarray, groups: np.ndarray | None, n_splits: int, seed: int):
+    """Out-of-fold predictions with scenario-grouped CV (falls back to GroupKFold, then plain)."""
+    from sklearn.model_selection import (
+        GroupKFold,
+        StratifiedGroupKFold,
+        StratifiedKFold,
+        cross_val_predict,
+    )
+
+    if groups is None:
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        return cross_val_predict(model, X, y, cv=cv)
+    try:
+        cv = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        return cross_val_predict(model, X, y, cv=cv, groups=groups)
+    except Exception:
+        cv = GroupKFold(n_splits=n_splits)
+        return cross_val_predict(model, X, y, cv=cv, groups=groups)
 
 
 def _fit_eval_clf(
-    X: np.ndarray,
-    y: np.ndarray,
-    kind: str,
-    seed: int,
+    X: np.ndarray, y: np.ndarray, groups: np.ndarray | None, kind: str, seed: int, n_splits: int,
     shuffle_labels: bool,
 ) -> dict[str, Any]:
-    """Cross-validated classification accuracy + macro-F1, with out-of-fold confusion matrix.
-
-    Returns ``accuracy``, ``macro_f1``, ``classes``, ``confusion`` (out-of-fold), and ``coef`` — the
-    per-class linear weight directions ``(n_classes, D)`` for ``kind == "linear"`` (else ``None``).
-    """
+    """Scenario-grouped CV accuracy + macro-F1, out-of-fold confusion, and (linear) weight directions."""
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
-    from sklearn.model_selection import StratifiedKFold, cross_val_predict
     from sklearn.neural_network import MLPClassifier
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    y = y.copy()
-    rng = np.random.default_rng(seed)
     if shuffle_labels:
-        y = y[rng.permutation(len(y))]
+        y = _group_shuffle(y, groups, seed) if groups is not None else \
+            y[np.random.default_rng(seed).permutation(len(y))]
 
     classes = sorted(set(y.tolist()))
     if len(classes) < 2:
@@ -91,22 +134,16 @@ def _fit_eval_clf(
         est = MLPClassifier(hidden_layer_sizes=(128, 128), max_iter=600, random_state=seed,
                             early_stopping=True)
     model = make_pipeline(StandardScaler(), est)
-
-    splits = _n_splits(y, 5)
-    cv = StratifiedKFold(n_splits=splits, shuffle=True, random_state=seed)
-    pred = cross_val_predict(model, X, y, cv=cv)
+    pred = _predict_oof(model, X, y, groups, n_splits, seed)
     acc = float(accuracy_score(y, pred))
     f1 = float(f1_score(y, pred, average="macro"))
     cm = confusion_matrix(y, pred, labels=classes)
 
     coef = None
     if kind == "linear" and not shuffle_labels:
-        # Refit on all data to expose the per-class weight directions (the steering-direction bridge).
         full = make_pipeline(StandardScaler(), LogisticRegression(
             max_iter=2000, C=1.0, class_weight="balanced")).fit(X, y)
-        lr = full.named_steps["logisticregression"]
-        coef = lr.coef_.astype(np.float32)  # (n_classes, D); binary -> (1, D)
-
+        coef = full.named_steps["logisticregression"].coef_.astype(np.float32)
     return {"accuracy": acc, "macro_f1": f1, "classes": classes, "confusion": cm, "coef": coef}
 
 
@@ -116,12 +153,14 @@ def classify_categories(
     seed: int = 0,
     output_csv: str | Path | None = None,
     pixel_baseline: bool = True,
+    min_scenarios_per_class: int = 4,
+    group_by_scenario: bool = True,
 ) -> dict[str, Any]:
-    """Run linear + MLP category classifiers per layer (with controls + appearance baseline).
+    """Run linear + MLP category classifiers per layer with scenario-grouped CV + controls.
 
-    Returns a dict with ``records`` (one row per layer × probe, with controls), ``confusions`` (per
-    layer, linear out-of-fold confusion matrix + class order), and ``directions`` (per layer, linear
-    per-class weight vectors ``(n_classes, D)`` — reused as candidate steering directions in Step 3).
+    Returns ``records`` (rows per layer x probe), ``confusions`` (per-layer linear out-of-fold matrix),
+    ``directions`` (per-layer linear per-class weight vectors — Step-3 steering candidates), and ``meta``
+    (kept/dropped categories, fold count, majority baseline).
     """
     dataset = LatentDataset(latent_dir, layers="all")
     available = dataset.available_layers()
@@ -130,39 +169,43 @@ def classify_categories(
     records: list[dict[str, Any]] = []
     confusions: dict[int, dict[str, Any]] = {}
     directions: dict[int, dict[str, Any]] = {}
+    meta: dict[str, Any] = {}
 
-    for layer in layer_list:
-        X, cats = pooled_features(latent_dir, layer)
-        y = np.asarray(cats)
+    def _run(X, y, groups, layer_tag, probe_prefix=""):
+        if group_by_scenario:
+            X, y, groups, keep, dropped = _filter_classes(X, y, groups, min_scenarios_per_class)
+            n_splits = _grouped_n_splits(y, groups) if len(set(y.tolist())) >= 2 else 2
+        else:
+            groups, keep, dropped, n_splits = None, sorted(set(y.tolist())), {}, 5
+        if not meta:
+            _, counts = np.unique(y, return_counts=True)
+            meta.update({"kept_categories": keep, "dropped_categories": dropped,
+                         "n_splits": int(n_splits), "n_samples": int(len(y)),
+                         "majority_rate": round(float(counts.max() / counts.sum()), 4),
+                         "group_by_scenario": group_by_scenario})
         for kind in ("linear", "mlp"):
-            real = _fit_eval_clf(X, y, kind, seed, shuffle_labels=False)
-            ctrl = _fit_eval_clf(X, y, kind, seed, shuffle_labels=True)
+            real = _fit_eval_clf(X, y, groups, kind, seed, n_splits, shuffle_labels=False)
+            ctrl = _fit_eval_clf(X, y, groups, kind, seed, n_splits, shuffle_labels=True)
             records.append({
-                "layer": layer, "probe": kind,
-                "accuracy": round(real["accuracy"], 4),
-                "macro_f1": round(real["macro_f1"], 4),
+                "layer": layer_tag, "probe": f"{probe_prefix}{kind}",
+                "accuracy": round(real["accuracy"], 4), "macro_f1": round(real["macro_f1"], 4),
                 "ctrl_shuffled_label_accuracy": round(ctrl["accuracy"], 4),
                 "n_classes": len(real["classes"]), "n_samples": int(len(y)),
             })
-            if kind == "linear":
-                confusions[layer] = {"matrix": real["confusion"], "classes": real["classes"]}
+            if probe_prefix == "" and kind == "linear":
+                confusions[layer_tag] = {"matrix": real["confusion"], "classes": real["classes"]}
                 if real["coef"] is not None:
-                    directions[layer] = {"classes": real["classes"], "coef": real["coef"]}
+                    directions[layer_tag] = {"classes": real["classes"], "coef": real["coef"]}
 
-    # Appearance baseline: pixel-only probe + shallowest-layer probe (already in the per-layer sweep).
+    for layer in layer_list:
+        X, y, ids = _load_pooled(latent_dir, layer)
+        groups = np.array([scenario_for_id(i) for i in ids])
+        _run(X, y, groups, layer)
+
     if pixel_baseline:
-        Xp, cats = _pixel_features(latent_dir)
-        yp = np.asarray(cats)
-        for kind in ("linear", "mlp"):
-            real = _fit_eval_clf(Xp, yp, kind, seed, shuffle_labels=False)
-            ctrl = _fit_eval_clf(Xp, yp, kind, seed, shuffle_labels=True)
-            records.append({
-                "layer": -1, "probe": f"pixel_{kind}",
-                "accuracy": round(real["accuracy"], 4),
-                "macro_f1": round(real["macro_f1"], 4),
-                "ctrl_shuffled_label_accuracy": round(ctrl["accuracy"], 4),
-                "n_classes": len(real["classes"]), "n_samples": int(len(yp)),
-            })
+        Xp, yp, ids = _load_pixels(latent_dir)
+        gp = np.array([scenario_for_id(i) for i in ids])
+        _run(Xp, yp, gp, -1, probe_prefix="pixel_")
 
     if output_csv is not None and records:
         path = Path(output_csv)
@@ -172,4 +215,4 @@ def classify_categories(
             writer.writeheader()
             writer.writerows(records)
 
-    return {"records": records, "confusions": confusions, "directions": directions}
+    return {"records": records, "confusions": confusions, "directions": directions, "meta": meta}

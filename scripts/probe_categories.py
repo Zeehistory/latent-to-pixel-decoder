@@ -35,6 +35,10 @@ def main() -> None:
     p.add_argument("--layers", default="all", help='"all" or comma-separated layer indices')
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--no_pixel_baseline", action="store_true")
+    p.add_argument("--min_scenarios_per_class", type=int, default=4,
+                   help="drop categories with fewer distinct scenarios (need >= for valid grouped CV)")
+    p.add_argument("--no_group", action="store_true",
+                   help="disable scenario-grouped CV (NOT recommended — leaks scenarios across folds)")
     p.add_argument("--subspace_layer", type=int, default=-1,
                    help="layer for subspace geometry; -1 = deepest available")
     args = p.parse_args()
@@ -47,6 +51,8 @@ def main() -> None:
         args.latent_dir, layers=layers, seed=args.seed,
         output_csv=out / "category_decodability.csv",
         pixel_baseline=not args.no_pixel_baseline,
+        min_scenarios_per_class=args.min_scenarios_per_class,
+        group_by_scenario=not args.no_group,
     )
     records = result["records"]
     if records:
@@ -85,7 +91,8 @@ def main() -> None:
     summary = {
         "latent_dir": str(args.latent_dir),
         "subspace_layer": int(sub_layer),
-        "categories": classes,
+        "cv": result["meta"],
+        "subspace_categories": classes,
         "separability": {k: round(float(v), 4) for k, v in sep.items()},
         "best_linear": max((r for r in records if r["probe"] == "linear" and r["layer"] >= 0),
                            key=lambda r: r["accuracy"], default=None),
@@ -94,11 +101,15 @@ def main() -> None:
         "pixel_baseline": [r for r in records if str(r["probe"]).startswith("pixel_")],
     }
     (out / "category_probe_summary.json").write_text(json.dumps(summary, indent=2))
-    print(f"[probe_categories] {len(records)} probe rows; subspace@layer{sub_layer} -> {out}")
+    m = result["meta"]
+    print(f"[probe_categories] {len(records)} probe rows; kept={m.get('kept_categories')} "
+          f"dropped={m.get('dropped_categories')} folds={m.get('n_splits')} "
+          f"majority={m.get('majority_rate')}")
     if summary["best_linear"]:
         b = summary["best_linear"]
-        print(f"[probe_categories] best linear acc={b['accuracy']} @layer{b['layer']} "
-              f"(shuffled ctrl={b['ctrl_shuffled_label_accuracy']}), fisher={sep.get('fisher_ratio')}")
+        print(f"[probe_categories] best linear acc={b['accuracy']} (macroF1={b['macro_f1']}) "
+              f"@layer{b['layer']} vs shuffled ctrl={b['ctrl_shuffled_label_accuracy']} / "
+              f"majority={m.get('majority_rate')}")
 
 
 if __name__ == "__main__":

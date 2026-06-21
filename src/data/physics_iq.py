@@ -28,6 +28,7 @@ from torch.utils.data import Dataset
 
 from ..utils.video_io import load_video
 from .dataset_registry import register_dataset
+from .physics_iq_categories import category_for_id
 from .video_transforms import VideoTransform
 
 # Physics-IQ category vocabulary (used for per-category split reporting).
@@ -73,6 +74,12 @@ class PhysicsIQDataset(Dataset):
             for path in sorted(search_dir.rglob("*.mp4")):
                 category = path.parent.name if path.parent != search_dir else "misc"
                 samples.append({"path": str(path), "category": category, "split": self.cfg.split})
+        # Assign the official physics category from the filename scenario (the on-disk folders encode
+        # frame rate / perspective, not the physics category). Fall back to any manifest-provided
+        # category, then "misc" for scenarios outside the official 66.
+        for s in samples:
+            stem = Path(s["path"]).stem
+            s["category"] = category_for_id(stem) or s.get("category", "misc")
         if self.cfg.categories != "all":
             allowed = set(self.cfg.categories)
             samples = [s for s in samples if s.get("category", "misc") in allowed]

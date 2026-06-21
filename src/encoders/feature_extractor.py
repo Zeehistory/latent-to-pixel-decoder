@@ -196,6 +196,9 @@ class LatentDataset(Dataset):
         # Map sample id -> (shard, member) and cache opened shards lazily.
         self._index = {r["id"]: r["shard"] for r in self.records}
         self._ids = [r["id"] for r in self.records]
+        # Category source of truth is metadata.parquet, so relabeling (e.g. fixing Physics-IQ
+        # categories) only rewrites the small parquet and not every shard.
+        self._category = {r["id"]: r.get("category") for r in self.records}
         self._shard_cache: dict[str, dict[str, Any]] = {}
 
     def __len__(self) -> int:
@@ -235,7 +238,7 @@ class LatentDataset(Dataset):
             "state": payload["state"],
             "state_mask": payload["state_mask"],
             "state_keys": payload["state_keys"],
-            "category": payload["category"],
+            "category": self._category.get(sid) or payload["category"],
         }
 
 
