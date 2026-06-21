@@ -37,6 +37,11 @@ dependencies = [
 encoders = ["transformers>=4.44", "huggingface-hub>=0.23", "safetensors>=0.4"]
 # Optional perceptual / analysis extras that are imported lazily.
 extras = ["lpips>=0.1.4", "umap-learn>=0.5", "webdataset>=0.2"]
+# Physics engines for Step-2 synthetic data (imported lazily, only when the dataset is used).
+# MuJoCo: rigid-body solid mechanics (CPU/GPU; headless render needs MUJOCO_GL=egl).
+sim_mujoco = ["mujoco>=3.1"]
+# Genesis: GPU-only fluid dynamics (SPH/MPM). Install on a CUDA node per the Genesis docs.
+sim_genesis = ["genesis-world"]
 demo = ["gradio>=4.0"]
 logging = ["wandb>=0.16", "tensorboard>=2.15"]
 dev = [

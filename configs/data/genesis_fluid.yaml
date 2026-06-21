@@ -1,0 +1,13 @@
+# Step 2: Genesis fluid-dynamics dataset (real SPH/MPM fluids, exact aggregate state).
+# Scenarios: pour, dam_break, drop. GPU-only — requires `pip install genesis-world` on a CUDA node.
+# Aggregate swarm state (centroid pos/vel/acc, spread, gravity) in the standard single-object layout.
+name: genesis_fluid
+root: null
+image_size: 128
+num_frames: 16
+fps: 8
+categories: all
+split: train
+num_clips: 256
+scenarios: all          # all = [pour, dam_break, drop]
+seed: 0

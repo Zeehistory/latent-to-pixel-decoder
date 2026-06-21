@@ -8,17 +8,26 @@
 #SBATCH --output=logs/extract_syn_%j.out
 #SBATCH --error=logs/extract_syn_%j.err
 
-# Step 2: extract VJEPA latents for a synthetic-physics (or robot_toy) dataset with exact GT labels.
-# The dataset is generated on the fly, so no data.root is needed.
-#   DATASET=synthetic_solid sbatch scripts/slurm_extract_synthetic.sh
-#   DATASET=synthetic_fluid sbatch scripts/slurm_extract_synthetic.sh
+# Step 2: extract VJEPA latents for a synthetic-physics dataset with exact GT labels.
+# The dataset is generated on the fly on this compute node, so no data.root / download is needed.
+#   DATASET=mujoco_solid    sbatch scripts/slurm_extract_synthetic.sh   # MuJoCo rigid-body (recommended)
+#   DATASET=genesis_fluid   sbatch scripts/slurm_extract_synthetic.sh   # Genesis fluids (GPU-only)
+#   DATASET=synthetic_solid sbatch scripts/slurm_extract_synthetic.sh   # lightweight 2D fallback
 #   DATASET=robot_toy       sbatch scripts/slurm_extract_synthetic.sh
-DATASET=${DATASET:-"synthetic_solid"}
+#
+# One-time engine install into the conda env (run on a compute node, not login):
+#   pip install -e .[sim_mujoco]     # MuJoCo
+#   pip install -e .[sim_genesis]    # Genesis (CUDA node)
+DATASET=${DATASET:-"mujoco_solid"}
 OUTPUT_DIR=${OUTPUT_DIR:-"/home/zss8/project_pi_jks79/zss8/vjepa/outputs/latents/$DATASET/vjepa2_large"}
 
 module purge
 module load miniconda
 conda activate vjepa-physics-decoder
+
+# Headless off-screen rendering for MuJoCo on the cluster (no display). Harmless for other datasets.
+export MUJOCO_GL=egl
+export PYOPENGL_PLATFORM=egl
 
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs

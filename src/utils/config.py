@@ -73,6 +73,7 @@ class DataConfig:
     num_clips: int = 64
     scenarios: Any = field(default_factory=lambda: ["bouncing_ball", "projectile"])
     seed: int = 0
+    ball_radius: float = 0.14  # mujoco_physics ball size
 
 
 @dataclass

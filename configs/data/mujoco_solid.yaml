@@ -1,0 +1,14 @@
+# Step 2: MuJoCo solid-mechanics dataset (real rigid-body engine, exact simulator state).
+# Scenarios: free_fall, projectile, bounce. Per-clip gravity/velocity vary so velocity/acceleration/
+# gravity probes are meaningful. Requires `pip install mujoco` (MUJOCO_GL=egl on headless cluster nodes).
+name: mujoco_physics
+root: null
+image_size: 128
+num_frames: 16
+fps: 8
+categories: all
+split: train
+num_clips: 256
+scenarios: all          # all = [free_fall, projectile, bounce]
+ball_radius: 0.14
+seed: 0
