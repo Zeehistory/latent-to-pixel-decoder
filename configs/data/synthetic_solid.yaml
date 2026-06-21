@@ -1,5 +1,8 @@
 # Step 2: solid-mechanics synthetic dataset (rigid-body dynamics) with exact ground-truth state.
-# Use for quantity probes: velocity, acceleration, gravity, collision.
+# Single-object scenarios only (freefall, projectile, bounce) so the GT state vector is homogeneous
+# (11 dims) across clips — clean for the velocity / acceleration / gravity quantity probes.
+# (Multi-object `collision`/`two_body` exist in the generator but are kept out here to avoid ragged
+#  state; use a dedicated config if you want to probe two-body interactions.)
 name: synthetic_physics
 root: null
 image_size: 64
@@ -8,5 +11,5 @@ fps: 8
 categories: all
 split: train
 num_clips: 256
-scenarios: [free_fall, projectile, bouncing_ball, collision]
+scenarios: [free_fall, projectile, bouncing_ball]
 seed: 0

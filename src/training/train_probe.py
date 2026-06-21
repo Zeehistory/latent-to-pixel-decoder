@@ -86,15 +86,22 @@ def _fit_eval(
     xtr, xte, ytr, yte = train_test_split(x, y, test_size=0.3, random_state=seed)
     scaler = StandardScaler().fit(xtr)
     xtr, xte = scaler.transform(xtr), scaler.transform(xte)
+    # Standardize targets too: physical quantities have tiny, heterogeneous scales (gravity ~1e-3),
+    # which otherwise make the MLP diverge to absurd negative R². Metrics are reported on the original
+    # scale via inverse_transform.
+    yscaler = StandardScaler().fit(ytr)
+    ytr_s = yscaler.transform(ytr)
     if kind == "linear":
         model: Any = Ridge(alpha=1.0)
     else:
-        model = MLPRegressor(hidden_layer_sizes=(128, 128), max_iter=300, random_state=seed)
-    model.fit(xtr, ytr)
-    pred = model.predict(xte)
-    if pred.ndim == 1:
-        pred = pred[:, None]
-        yte = yte if yte.ndim == 2 else yte[:, None]
+        model = MLPRegressor(
+            hidden_layer_sizes=(256,), alpha=1e-3, max_iter=1000, early_stopping=True,
+            n_iter_no_change=25, random_state=seed,
+        )
+    model.fit(xtr, ytr_s)
+    pred_s = model.predict(xte)
+    pred = yscaler.inverse_transform(pred_s if pred_s.ndim == 2 else pred_s[:, None])
+    yte = yte if yte.ndim == 2 else yte[:, None]
     return {
         "r2": float(r2_score(yte, pred)),
         "rmse": float(np.sqrt(((pred - yte) ** 2).mean())),
