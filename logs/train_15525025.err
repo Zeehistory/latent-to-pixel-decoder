@@ -1,0 +1,80 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+The following values were not passed to `accelerate launch` and had defaults used instead:
+		More than one GPU was found, enabling multi-GPU training.
+		If this was unintended please pass in `--num_processes=1`.
+	`--num_machines` was set to a value of `1`
+	`--dynamo_backend` was set to a value of `'no'`
+To avoid this warning pass in values for each of the problematic parameters or run `accelerate config`.
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/train_decoder.py", line 44, in <module>
+[rank0]:     main()
+[rank0]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/train_decoder.py", line 39, in main
+[rank0]:     summary = train_decoder(cfg)
+[rank0]:               ^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/training/train_decoder.py", line 84, in train_decoder
+[rank0]:     write_run_metadata(out_dir, {"experiment": "train_decoder", "decoder_params": decoder.num_parameters()})
+[rank0]:                                                                                   ^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1967, in __getattr__
+[rank0]:     raise AttributeError(
+[rank0]: AttributeError: 'DistributedDataParallel' object has no attribute 'num_parameters'. Did you mean: '_parameters'?
+[rank0]:[W619 13:07:37.351417131 ProcessGroupNCCL.cpp:1647] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+W0619 13:07:40.644000 415560 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 415692 closing signal SIGTERM
+W0619 13:07:40.644000 415560 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 415693 closing signal SIGTERM
+W0619 13:07:40.645000 415560 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 415694 closing signal SIGTERM
+E0619 13:07:40.959000 415560 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:988] failed (exitcode: 1) local_rank: 0 (pid: 415691) of binary: /home/zss8/.conda/envs/vjepa-physics-decoder/bin/python
+Traceback (most recent call last):
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/bin/accelerate", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1398, in launch_command
+    multi_gpu_launcher(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1023, in multi_gpu_launcher
+    distrib_run.run(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/run.py", line 1007, in run
+    elastic_launch(
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 191, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 371, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+scripts/train_decoder.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-06-19_13:07:40
+  host      : a1112u29n01.mghpcc.ycrc.yale.edu
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 415692)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 415692
+[2]:
+  time      : 2026-06-19_13:07:40
+  host      : a1112u29n01.mghpcc.ycrc.yale.edu
+  rank      : 2 (local_rank: 2)
+  exitcode  : -15 (pid: 415693)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 415693
+[3]:
+  time      : 2026-06-19_13:07:40
+  host      : a1112u29n01.mghpcc.ycrc.yale.edu
+  rank      : 3 (local_rank: 3)
+  exitcode  : -15 (pid: 415694)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 415694
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-06-19_13:07:40
+  host      : a1112u29n01.mghpcc.ycrc.yale.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 415691) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

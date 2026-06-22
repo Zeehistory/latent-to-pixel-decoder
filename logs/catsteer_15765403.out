@@ -1,0 +1,2 @@
+[steer_category] method=diff_means/all_layers steer_layers=[6, 12, 18, 23] per-token norms={6: 241.2, 12: 207.7, 18: 163.8, 23: 149.8} alpha(frac)=0..1.5
+[steer_category] fluid_dynamics->solid_mechanics [diff_means/all]: readout monotonicity rho=0.655 over 4 clips -> /home/zss8/project_pi_jks79/zss8/vjepa/outputs/analysis/steer_category/fluid_dynamics_to_solid_mechanics_diff_means

@@ -1,0 +1,2 @@
+[steer_category] layer23 per-token L2 norm ~149.76; |alpha| range 0..128 => per-token edit 0..128 (85.5% of token norm at max)
+[steer_category] fluid_dynamics->solid_mechanics @layer23: readout monotonicity rho=0.845 over 2 clips -> /home/zss8/project_pi_jks79/zss8/vjepa/outputs/analysis/steer_category/fluid_to_solid_bigalpha

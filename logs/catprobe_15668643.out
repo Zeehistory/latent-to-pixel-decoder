@@ -1,0 +1,2 @@
+[probe_categories] 10 probe rows; subspace@layer23 -> /home/zss8/project_pi_jks79/zss8/vjepa/outputs/analysis/physics_iq/category_probe
+[probe_categories] best linear acc=0.6618 @layer12 (shuffled ctrl=0.519), fisher=0.0008320666085951003

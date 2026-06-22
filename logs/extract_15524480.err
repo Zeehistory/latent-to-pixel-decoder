@@ -1,0 +1,22 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+/apps/custom/lmod/8.7.48/init/bash: line 190: conda: command not found
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/587 [00:00<?, ?it/s]Loading weights: 100%|██████████| 587/587 [00:00<00:00, 24961.29it/s]
+Traceback (most recent call last):
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/extract_latents.py", line 68, in <module>
+    main()
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/extract_latents.py", line 54, in main
+    dataset = build_dataset(cfg.data, encoder_image_size=cfg.encoder.image_size,
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/dataset_registry.py", line 45, in build_dataset
+    return _REGISTRY[name](cfg, encoder_image_size=encoder_image_size, encoder_frames=encoder_frames)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/physics_iq.py", line 106, in _build_physics_iq
+    return PhysicsIQDataset(cfg, encoder_image_size, encoder_frames)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/physics_iq.py", line 54, in __init__
+    raise FileNotFoundError(f"Physics-IQ root not found: {self.root}")
+FileNotFoundError: Physics-IQ root not found: /home/zss8/project_pi_jks79/zss8/datasets/physics_iq

@@ -1,0 +1,125 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+The following values were not passed to `accelerate launch` and had defaults used instead:
+		More than one GPU was found, enabling multi-GPU training.
+		If this was unintended please pass in `--num_processes=1`.
+	`--num_machines` was set to a value of `1`
+	`--dynamo_backend` was set to a value of `'no'`
+To avoid this warning pass in values for each of the problematic parameters or run `accelerate config`.
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/train_decoder.py", line 44, in <module>
+[rank1]:     main()
+[rank1]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/train_decoder.py", line 39, in main
+[rank1]:     summary = train_decoder(cfg)
+[rank1]:               ^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/training/train_decoder.py", line 95, in train_decoder
+[rank1]:     out = decoder(latents, grid)
+[rank1]:           ^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1832, in forward
+[rank1]:     else self._run_ddp_forward(*inputs, **kwargs)
+[rank1]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/parallel/distributed.py", line 1657, in _run_ddp_forward
+[rank1]:     return self.module(*inputs, **kwargs)  # type: ignore[index]
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1778, in _wrapped_call_impl
+[rank1]:     return self._call_impl(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+[rank1]:     return forward_call(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/utils/operations.py", line 943, in forward
+[rank1]:     return model_forward(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/utils/operations.py", line 931, in __call__
+[rank1]:     return convert_to_fp32(self.model_forward(*args, **kwargs))
+[rank1]:                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/amp/autocast_mode.py", line 44, in decorate_autocast
+[rank1]:     return func(*args, **kwargs)
+[rank1]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/decoders/transformer_video_decoder.py", line 160, in forward
+[rank1]:     memory = self._build_memory(latents, grid)
+[rank1]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/decoders/transformer_video_decoder.py", line 138, in _build_memory
+[rank1]:     t_emb = _sincos_1d(tp, self.dim).to(self.latent_proj.weight.device)
+[rank1]:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/data/_utils/signal_handling.py", line 73, in handler
+[rank1]:     _error_if_any_worker_fails()
+[rank1]: RuntimeError: DataLoader worker (pid 404420) is killed by signal: Killed. 
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+  0%|          | 0.00/233M [00:00<?, ?B/s]  0%|          | 0.00/233M [00:00<?, ?B/s]  0%|          | 0.00/233M [00:00<?, ?B/s]  6%|▌         | 14.1M/233M [00:00<00:01, 148MB/s]  5%|▌         | 12.6M/233M [00:00<00:01, 132MB/s]  5%|▌         | 12.4M/233M [00:00<00:01, 130MB/s]W0619 13:32:39.279000 404241 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 404329 closing signal SIGTERM
+W0619 13:32:39.280000 404241 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 404331 closing signal SIGTERM
+W0619 13:32:39.281000 404241 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 404332 closing signal SIGTERM
+E0619 13:32:39.328000 404241 /nfs/roberts/project/pi_jks79/zss8/ycrc_conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/api.py:988] failed (exitcode: 1) local_rank: 1 (pid: 404330) of binary: /home/zss8/.conda/envs/vjepa-physics-decoder/bin/python
+Traceback (most recent call last):
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/bin/accelerate", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 50, in main
+    args.func(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1398, in launch_command
+    multi_gpu_launcher(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1023, in multi_gpu_launcher
+    distrib_run.run(args)
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/run.py", line 1007, in run
+    elastic_launch(
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 191, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 371, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+scripts/train_decoder.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-06-19_13:32:39
+  host      : a1112u13n01.mghpcc.ycrc.yale.edu
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 404329)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 404329
+[2]:
+  time      : 2026-06-19_13:32:39
+  host      : a1112u13n01.mghpcc.ycrc.yale.edu
+  rank      : 2 (local_rank: 2)
+  exitcode  : -15 (pid: 404331)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 404331
+[3]:
+  time      : 2026-06-19_13:32:39
+  host      : a1112u13n01.mghpcc.ycrc.yale.edu
+  rank      : 3 (local_rank: 3)
+  exitcode  : -15 (pid: 404332)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 404332
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-06-19_13:32:39
+  host      : a1112u13n01.mghpcc.ycrc.yale.edu
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 404330) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[2026-06-19T13:32:40.192] error: Detected 1 oom_kill event in StepId=15525685.batch. Some of the step tasks have been OOM Killed.

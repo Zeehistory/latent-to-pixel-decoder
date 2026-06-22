@@ -1,0 +1,14 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+/apps/custom/lmod/8.7.48/init/bash: line 169: conda: command not found
+usage: steer_category.py [-h] --config CONFIG --target_latent_dir
+                         TARGET_LATENT_DIR --directions DIRECTIONS
+                         --checkpoint CHECKPOINT --output_dir OUTPUT_DIR
+                         [--from_category FROM_CATEGORY]
+                         [--to_category TO_CATEGORY] [--layer LAYER]
+                         [--alphas ALPHAS] [--num_samples NUM_SAMPLES]
+                         [--device DEVICE]
+                         [overrides ...]
+steer_category.py: error: argument --alphas: expected one argument

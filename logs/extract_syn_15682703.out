@@ -1,0 +1,52 @@
+[38;5;159m[Genesis] [10:15:39] [INFO] [38;5;121m╭───────────────────────────────────────────────╮[0m[38;5;159m[0m
+[38;5;159m[Genesis] [10:15:39] [INFO] [38;5;121m│┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈[0m[38;5;159m [38;5;121m[1m[3mGenesis[0m[38;5;159m [38;5;121m┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈┉┈│[0m[38;5;159m[0m
+[38;5;159m[Genesis] [10:15:39] [INFO] [38;5;121m╰───────────────────────────────────────────────╯[0m[38;5;159m[0m
+[38;5;159m[Genesis] [10:15:39] [INFO] Running on [38;5;121m[4m[NVIDIA RTX PRO 6000 Blackwell Server Edition][0m[38;5;159m with backend [38;5;121m[4mgs.cuda[0m[38;5;159m. Device memory: [38;5;121m[4m94.97[0m[38;5;159m GB.[0m
+[38;5;159m[Genesis] [10:15:39] [INFO] 🚀 Genesis initialized. 🔖 version: [38;5;121m[4m1.1.2[0m[38;5;159m, 🎨 theme: [38;5;121m[4mdark[0m[38;5;159m, 🌱 seed: [38;5;121m[4mNone[0m[38;5;159m, 🐛 debug: [38;5;121m[4mFalse[0m[38;5;159m, 📏 precision: [38;5;121m[4m32[0m[38;5;159m, 🔥 performance: [38;5;121m[4mFalse[0m[38;5;159m, 💬 verbose: [38;5;121m[4mINFO[0m[38;5;159m[0m
+[38;5;159m[Genesis] [10:15:42] [INFO] Scene [38;5;121m[3m<f7a08c1>[0m[38;5;159m created.[0m
+[38;5;159m[Genesis] [10:15:42] [INFO] Adding [38;5;121m<gs.engine.entities.RigidEntity>[0m[38;5;159m. idx: [38;5;121m0[0m[38;5;159m, uid: [38;5;121m[3m<6017abb>[0m[38;5;159m, morph: [38;5;121m<gs.morphs.Plane>[0m[38;5;159m, material: [38;5;121m<gs.materials.Rigid>[0m[38;5;159m.[0m
+[38;5;159m[Genesis] [10:15:47] [INFO] Adding [38;5;121m<gs.engine.entities.SPHEntity>[0m[38;5;159m. idx: [38;5;121m1[0m[38;5;159m, uid: [38;5;121m[3m<51e92c2>[0m[38;5;159m, morph: [38;5;121m<gs.morphs.Box>[0m[38;5;159m, material: [38;5;121m<gs.materials.SPH.Liquid>[0m[38;5;159m.[0m
+[38;5;159m[Genesis] [10:15:47] [INFO] Sampling particles with [38;5;121mregular[0m[38;5;159m sampler and generating `.ptc` file:[0m
+[38;5;159m[Genesis] [10:15:49] [INFO] Sampled [38;5;121m[4m490[0m[38;5;159m particles.[0m
+[38;5;159m[Genesis] [10:15:49] [INFO] Building scene [38;5;121m[3m<f7a08c1>[0m[38;5;159m...[0m
+[38;5;226m[Genesis] [10:15:53] [WARNING] Current timestep (0.008333) is larger than the stable timestep (0.0032) for SPH solver. Please consider reducing the timestep, liquid viscosity (mu), or increasing the particle size.[0m
+[38;5;159m[Genesis] [10:15:53] [INFO] Preprocessing geom idx [38;5;121m[4m0[0m[38;5;159m.[0m
+[38;5;159m[Genesis] [10:15:53] [INFO] Compiling simulation kernels...[0m
+[38;5;159m[Genesis] [10:16:02] [INFO] Building visualizer...[0m
+Traceback (most recent call last):
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/extract_latents.py", line 68, in <module>
+    main()
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/scripts/extract_latents.py", line 58, in main
+    out = extract_latents(
+          ^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/encoders/feature_extractor.py", line 127, in extract_latents
+    for batch in tqdm(loader, desc="extract latents"):
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/data/dataloader.py", line 718, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/data/dataloader.py", line 778, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py", line 54, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py", line 54, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+            ~~~~~~~~~~~~^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/genesis_fluid.py", line 160, in __getitem__
+    sample = self._generate(idx)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/genesis_fluid.py", line 128, in _generate
+    pos = self._particles(liquid)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/nfs/roberts/project/pi_jks79/zss8/latent-to-pixel-decoder/src/data/genesis_fluid.py", line 110, in _particles
+    raise RuntimeError("Could not read Genesis particle positions; adjust the # GENESIS API call.")
+RuntimeError: Could not read Genesis particle positions; adjust the # GENESIS API call.
+
+[38;5;9m[Genesis] [10:16:18] [ERROR] RuntimeError: Could not read Genesis particle positions; adjust the # GENESIS API call.[0m
+[38;5;159m[Genesis] [10:16:18] [INFO] 💤 Exiting Genesis and caching compiled kernels...[0m

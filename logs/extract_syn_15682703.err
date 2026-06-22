@@ -1,0 +1,9 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+/apps/custom/lmod/8.7.48/init/bash: line 169: conda: command not found
+Loading weights:   0%|          | 0/587 [00:00<?, ?it/s]Loading weights:  35%|███▍      | 203/587 [00:00<00:00, 2029.80it/s]Loading weights:  69%|██████▉   | 406/587 [00:00<00:00, 1998.74it/s]Loading weights: 100%|██████████| 587/587 [00:00<00:00, 2064.79it/s]
+extract latents:   0%|          | 0/16 [00:00<?, ?it/s]/home/zss8/.conda/envs/vjepa-physics-decoder/lib/python3.11/site-packages/quadrants/_test_tools/warnings_helper.py:11: UserWarning: cannot create weak reference to 'tuple' object. Template mapper caching disabled.
+  warnings.warn(message)
+extract latents:   0%|          | 0/16 [00:39<?, ?it/s]
