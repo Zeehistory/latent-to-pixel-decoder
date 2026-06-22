@@ -42,8 +42,8 @@ python scripts/steer_category.py \
     --checkpoint "$CHECKPOINT" \
     --from_category "$FROM_CATEGORY" \
     --to_category "$TO_CATEGORY" \
-    --layer "$LAYER" \
-    --alphas "$ALPHAS" \
+    --layer="$LAYER" \
+    --alphas="$ALPHAS" \
     --num_samples "$NUM_SAMPLES" \
     --output_dir "$OUTPUT_DIR" \
     --device cuda
