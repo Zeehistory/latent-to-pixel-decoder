@@ -27,7 +27,7 @@ ALL_LAYERS=${ALL_LAYERS:-"1"}
 FROM_CATEGORY=${FROM_CATEGORY:-"fluid_dynamics"}
 TO_CATEGORY=${TO_CATEGORY:-"solid_mechanics"}
 LAYER=${LAYER:-"-1"}
-ALPHAS=${ALPHAS:-"0,0.25,0.5,0.75,1.0,1.5"}
+ALPHAS=${ALPHAS:-"0,0.05,0.1,0.15,0.2,0.3"}
 NUM_SAMPLES=${NUM_SAMPLES:-"4"}
 OUTPUT_DIR=${OUTPUT_DIR:-"/home/zss8/project_pi_jks79/zss8/vjepa/outputs/analysis/steer_category/${FROM_CATEGORY}_to_${TO_CATEGORY}_${METHOD}"}
 

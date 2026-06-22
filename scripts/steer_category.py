@@ -51,10 +51,34 @@ from scipy.stats import spearmanr
 from src.analysis import steering
 from src.analysis import visualization as viz
 from src.analysis.intervention import apply_intervention_multi
+from src.data.physics_iq_categories import scenario_for_id
 from src.decoders import build_decoder
 from src.encoders.feature_extractor import LatentDataset, latent_collate
 from src.training.checkpoints import load_checkpoint
 from src.utils.config import load_config
+
+
+def _distinct_scenario_clips(target: LatentDataset, category: str, n: int) -> list[int]:
+    """Indices of up to ``n`` clips of ``category``, one per *distinct scenario*.
+
+    Physics-IQ ships each scenario as ~6 near-duplicate clips (perspectives x takes); naively taking
+    the first ``n`` clips returns perspectives of the *same* scene. Deduping by scenario gives ``n``
+    genuinely different fluid phenomena (e.g. balloon, juice, pour) instead of one scene six times.
+    """
+    seen: set[str] = set()
+    idx: list[int] = []
+    for i in range(len(target)):
+        s = target[i]
+        if s["category"] != category:
+            continue
+        sc = scenario_for_id(s["id"])
+        if sc in seen:
+            continue
+        seen.add(sc)
+        idx.append(i)
+        if len(idx) >= n:
+            break
+    return idx
 
 
 def _unit_direction(args, latent_dir: str, layer: int) -> tuple[np.ndarray, dict]:
@@ -82,8 +106,9 @@ def main() -> None:
     p.add_argument("--from_category", default="fluid_dynamics", help="category of the clips we steer")
     p.add_argument("--to_category", default="solid_mechanics", help="category we steer toward")
     p.add_argument("--layer", type=int, default=-1, help="intervention layer; -1 = deepest available")
-    p.add_argument("--alphas", default="0,0.25,0.5,0.75,1.0",
-                   help="sweep, as a FRACTION of each layer's per-token norm")
+    p.add_argument("--alphas", default="0,0.05,0.1,0.15,0.2,0.3",
+                   help="sweep, as a FRACTION of each layer's per-token norm (fine low range: the "
+                        "readout saturates and the decode degrades well before 1.0)")
     p.add_argument("--num_samples", type=int, default=4, help="how many from_category clips to steer")
     p.add_argument("--device", default="cpu")
     p.add_argument("overrides", nargs="*")
@@ -108,12 +133,13 @@ def main() -> None:
         unit_dirs[L] = torch.from_numpy(dnp).to(device)
         dinfo[L] = info
 
-    # which clips are from_category — these are the ones we steer.
-    steer_idx = [i for i in range(len(target)) if target[i]["category"] == args.from_category]
+    # which clips to steer — one per distinct scenario (avoid near-duplicate perspectives/takes).
+    steer_idx = _distinct_scenario_clips(target, args.from_category, args.num_samples)
     if not steer_idx:
         raise SystemExit(f"No clips with category '{args.from_category}' in {args.target_latent_dir}.")
-    steer_idx = steer_idx[: args.num_samples]
     steer_ids = {target[i]["id"] for i in steer_idx}
+    print(f"[steer_category] steering {len(steer_idx)} distinct '{args.from_category}' scenarios: "
+          f"{[scenario_for_id(target[i]['id']) for i in steer_idx]}")
 
     # 2. independent readout: P(to_category) fit on the rest of the cache (excludes the steered clips).
     readout = steering.category_readout(args.target_latent_dir, read_layer, args.to_category,
