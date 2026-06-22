@@ -113,6 +113,17 @@ def main() -> None:
         grid = tuple(int(x) for x in batch["grid"])
         latents = {int(k): v.to(device) for k, v in batch["layers"].items()}
 
+        if n == 0:
+            # Magnitude diagnostic: the unit direction is added per token, so the per-token edit size
+            # is |alpha|. Compare against the latent's own per-token norm to judge whether the sweep is
+            # a gentle nudge or a hard push (helps distinguish "alpha too small" from "decoder ignores
+            # the edit" when decoded pixels do not move).
+            tok_norm = float(latents[layer].norm(dim=-1).mean())
+            print(f"[steer_category] layer{layer} per-token L2 norm ~{tok_norm:.2f}; "
+                  f"|alpha| range {min(abs(a) for a in alphas):g}..{max(abs(a) for a in alphas):g} "
+                  f"=> per-token edit {min(abs(a) for a in alphas):g}..{max(abs(a) for a in alphas):g} "
+                  f"({100*max(abs(a) for a in alphas)/max(tok_norm,1e-6):.1f}% of token norm at max)")
+
         curve = steering.readout_along_direction(latents, direction, layer, alphas, readout)
         per_sample_curves[sid] = curve
         for r in curve:
