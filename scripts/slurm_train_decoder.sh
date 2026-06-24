@@ -16,6 +16,7 @@
 
 LATENT_DIR=${LATENT_DIR:-"/home/zss8/project_pi_jks79/zss8/vjepa/outputs/latents/physics_iq/vjepa2_large"}
 OUTPUT_DIR=${OUTPUT_DIR:-"/home/zss8/project_pi_jks79/zss8/vjepa/outputs/runs/physics_iq_decoder_large"}
+CONFIG=${CONFIG:-"configs/train/physics_iq_transformer_large.yaml"}
 
 module purge
 module load miniconda
@@ -30,6 +31,6 @@ accelerate launch \
     --num_processes $SLURM_GPUS_ON_NODE \
     --mixed_precision bf16 \
     scripts/train_decoder.py \
-    --config configs/train/physics_iq_transformer_large.yaml \
+    --config "$CONFIG" \
     --latent_dir "$LATENT_DIR" \
     --output_dir "$OUTPUT_DIR"
