@@ -207,6 +207,8 @@ show the principle transfers/generalizes rather than overfitting one model.
 
 ## Changelog
 
+- **2026-06-24** — Step 2 velocity-first RUN on cluster (bouchet, gpu_rtx6000). Velocity probe: vel linear R²: clip_pool 0.996@L10, temporal 0.998@L23 (controls collapse: shuf -0.738, rand -0.582). Occlusion: hidden-token vel R² 0.9975@L9 (visible 0.9986). Equivariance: max direction-R² 0.985@L8, circ 0.954; best equivErr 0.571@L11. Steering: speed: readout ρ=1.000, decoded-measured ρ=—; vel_x: readout ρ=1.000, decoded-measured ρ=—; vel_y: readout ρ=1.000, decoded-measured ρ=—. Fixes applied this run: probe/decoder/steer mem 64G→192G, shard-cache eviction between layers, LatentDataset cache pruned to selected layers (decoder OOM), re-extracted equivariance latents (prior cache had no metadata.parquet). Full numbers in `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
+
 - **2026-06-24** — Step 2 velocity-first RUN on cluster (bouchet, gpu_rtx6000). Velocity probe: vel linear R²: clip_pool 0.996@L10, temporal 0.998@L23 (controls collapse: shuf -0.738, rand -0.582). Occlusion: hidden-token vel R² 0.9975@L9 (visible 0.9986). Equivariance: max direction-R² 0.985@L8, circ 0.954; best equivErr 0.571@L11. Steering: speed: missing; vel_x: missing; vel_y: missing. Fixes applied this run: probe/decoder/steer mem 64G→192G, shard-cache eviction between layers, LatentDataset cache pruned to selected layers (decoder OOM), re-extracted equivariance latents (prior cache had no metadata.parquet). Full numbers in `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
 - **2026-06-23** — Step 2 velocity-first: built the full controlled experiment pipeline. New files:
   `src/data/moving_ball.py` (clean 2D generator, 3 scenarios), `src/analysis/ball_tracking.py`
