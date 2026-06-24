@@ -78,7 +78,11 @@ def main() -> None:
     device = args.device
 
     target = LatentDataset(args.target_latent_dir, layers=cfg.encoder.layers)
-    available = target.available_layers()
+    # available_layers() reflects the metadata's full extracted set, but each sample's tensors are
+    # filtered to cfg.encoder.layers (the layers the decoder was trained on). Derive the steerable set
+    # from the layers ACTUALLY loaded so steer_layers always matches the per-sample latents dict
+    # (otherwise e.g. layer 0 is in `available` but absent from `latents` -> KeyError).
+    available = sorted(int(k) for k in target[0]["layers"].keys())
     read_layer = max(available) if args.layer < 0 else args.layer
     steer_layers = sorted(available) if args.all_layers else [read_layer]
 
