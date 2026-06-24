@@ -104,7 +104,7 @@ How: start with **linear + MLP** probes.
 `[z_1..z_T]` and/or GRU — clip-pooling threw away the temporal axis where dynamics live (`8×1024`
 temporal-preserving probe is the natural next rep), (c) revisit the dropped thermo/magnetism categories.
 
-### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — VELOCITY-FIRST BUILT, probes TODO
+### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — VELOCITY-FIRST probes DONE, steering BLOCKED
 Physics-IQ has no specific labels, so generate synthetic datasets specializing in e.g. solid mechanics
 (freefall, projectile, bounce) and fluid dynamics, with **exact** ground-truth state. Then train probes
 for **velocity, acceleration, gravity, …** → answers precisely *which subspace encodes which quantity*.
@@ -157,11 +157,17 @@ direction-R² (recover angle from 2D subspace), and per-pair equivariance error 
 6. (needs decoder first) `TARGET=speed sbatch slurm_steer_velocity.sh`
 Or in one go: `source scripts/slurm_step2_velocity_pipeline.sh`
 
-**Status:** ALL CODE BUILT. **TODO:** run on cluster, fill in R² table below.
+**Status:** RUN ON CLUSTER (2026-06-24). Velocity/occlusion/equivariance probes done; steering did NOT complete (see digest). See `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
 
 | layer | clip_pool vel R² | temporal vel R² | temporal_diff vel R² |
 |-------|------------------|-----------------|----------------------|
-| TBD   | —                | —               | —                    |
+| 6    | 0.992            | 0.991           | 0.977                |
+| 9    | 0.995            | 0.996           | 0.989                |
+| 12    | 0.996            | 0.997           | 0.994                |
+| 15    | 0.994            | 0.997           | 0.994                |
+| 18    | 0.995            | 0.997           | 0.994                |
+| 21    | 0.995            | 0.998           | 0.995                |
+| 23    | 0.995            | 0.998           | 0.995                |
 
 **Older MuJoCo/Genesis engines:** `mujoco_solid`, `genesis_fluid` still in repo (use `slurm_train_probe.sh`
 for the broader quantity-probe table). Genesis API may need version-specific tweaks (`# GENESIS API` lines).
@@ -200,6 +206,8 @@ show the principle transfers/generalizes rather than overfitting one model.
 ---
 
 ## Changelog
+
+- **2026-06-24** — Step 2 velocity-first RUN on cluster (bouchet, gpu_rtx6000). Velocity probe: vel linear R²: clip_pool 0.996@L10, temporal 0.998@L23 (controls collapse: shuf -0.738, rand -0.582). Occlusion: hidden-token vel R² 0.9975@L9 (visible 0.9986). Equivariance: max direction-R² 0.985@L8, circ 0.954; best equivErr 0.571@L11. Steering: speed: missing; vel_x: missing; vel_y: missing. Fixes applied this run: probe/decoder/steer mem 64G→192G, shard-cache eviction between layers, LatentDataset cache pruned to selected layers (decoder OOM), re-extracted equivariance latents (prior cache had no metadata.parquet). Full numbers in `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
 - **2026-06-23** — Step 2 velocity-first: built the full controlled experiment pipeline. New files:
   `src/data/moving_ball.py` (clean 2D generator, 3 scenarios), `src/analysis/ball_tracking.py`
   (pixel-tracker for visual evidence), `src/training/velocity_probe.py` (temporal 8×1024 probe),
