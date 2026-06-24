@@ -117,6 +117,9 @@ def run_occlusion_probe(
     records = []
     for layer in layer_list:
         Xv, Yv, Xh, Yh = _build_dataset(dataset, layer)
+        # Evict the per-shard latent cache between layers (holds full multi-layer token tensors for
+        # every shard); without this the cache accumulates across layers and OOMs the job.
+        dataset._shard_cache.clear()
         # train on visible, test on visible (80/20 split)
         n = len(Xv)
         split = int(0.8 * n)

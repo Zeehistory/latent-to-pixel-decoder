@@ -2,7 +2,7 @@
 #SBATCH --job-name=vjepa_vel_probe
 #SBATCH --partition=gpu_rtx6000
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=192G
 #SBATCH --time=3:00:00
 #SBATCH --output=logs/vel_probe_%j.out
 #SBATCH --error=logs/vel_probe_%j.err

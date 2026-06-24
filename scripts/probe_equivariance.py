@@ -194,6 +194,9 @@ def main() -> None:
     report = {}
     for layer in layer_list:
         feats, angles, speeds, _ = _load_layer(dataset, layer)
+        # Evict the per-shard latent cache between layers to avoid accumulating every shard's full
+        # multi-layer token tensors in RAM (OOMs the job when run with --layers all).
+        dataset._shard_cache.clear()
         proj2d, _ = _fit_velocity_subspace(feats, k=2)
         circ = _circularity(proj2d)
         r2_ang = _angle_from_projection(proj2d, angles)

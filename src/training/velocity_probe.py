@@ -129,6 +129,9 @@ def probe_velocity(
     records: list[dict[str, Any]] = []
     for layer in layer_list:
         reps, tgts = _build_reps(dataset, layer)
+        # Evict the per-shard latent cache between layers: it holds every shard's full multi-layer
+        # token tensors, so without clearing it the 100GB+ cache accumulates across layers and OOMs.
+        dataset._shard_cache.clear()
         for rep in representations:
             X = reps[rep]
             for tgt in targets:
