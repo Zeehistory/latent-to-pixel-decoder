@@ -1,6 +1,0 @@
-== standardized (z-score) probe ==
-[probe_categories] 10 probe rows; kept=['fluid_dynamics', 'optics', 'solid_mechanics'] dropped={} folds=5 majority=0.5924
-[probe_categories] best linear acc=0.9076 (macroF1=0.8972) @layer18 vs shuffled ctrl=0.3917 / majority=0.5924
-== raw (no z-score) probe ==
-[probe_categories] 10 probe rows; kept=['fluid_dynamics', 'optics', 'solid_mechanics'] dropped={} folds=5 majority=0.5924
-[probe_categories] best linear acc=0.8981 (macroF1=0.8865) @layer23 vs shuffled ctrl=0.4618 / majority=0.5924

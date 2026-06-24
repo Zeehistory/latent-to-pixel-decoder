@@ -18,6 +18,7 @@ venv/
 
 # Project artifacts (do not commit large data / runs)
 outputs/
+logs/
 data/raw/
 data/processed/
 *.tar

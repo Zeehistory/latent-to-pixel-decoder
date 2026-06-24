@@ -1,8 +1,8 @@
 <div align="center">
 
-# vjepa-physics-decoder
+# vjepa-latent-physics
 
-**Decoding and interpreting physics in frozen V-JEPA / V-JEPA2 / VGFR video representations.**
+**Probing and steering physical quantities in the latent space of frozen V-JEPA2 video models.**
 
 [![ci](https://img.shields.io/badge/ci-github--actions-blue)](.github/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
@@ -10,10 +10,15 @@
 
 </div>
 
-A research-grade, reproducible framework for testing whether **frozen** V-JEPA-style video
-representations encode human-interpretable physical structure — position, velocity, acceleration,
-direction, gravity, collisions, and object permanence — and whether a decoder can map those latents
-back into physical video and physical state.
+A research-grade, reproducible framework for two questions about **frozen** V-JEPA2 video
+representations: (1) **which latent subspace encodes which physical quantity** — position, velocity,
+acceleration, direction, gravity, collisions, object permanence — and (2) **can we steer that
+subspace** and decode the result back into video to visually confirm the intervention changed the
+physics, not just the appearance.
+
+The methodology is deliberately staged (see [ROADMAP.md](ROADMAP.md)): probe real benchmark video
+(Step 1), isolate single quantities with maximally clean synthetic data (Step 2), transfer the learned
+quantity directions back to real video (Step 3), and apply the same machinery to robotics (Step 4).
 
 > **Research discipline.** This repo is careful to separate distinct claims:
 > *"the decoder reconstructs pixels"* ≠ *"the latent contains physical information"* ≠
@@ -50,7 +55,7 @@ decoded physical changes.
 ## Install
 
 ```bash
-git clone <repo> && cd vjepa-physics-decoder
+git clone <repo> && cd vjepa-latent-physics
 python -m pip install -e .[dev]                 # offline mock pipeline + tooling
 # optional extras:
 python -m pip install -e .[encoders]            # real V-JEPA2 weights (transformers + hub)
@@ -141,16 +146,25 @@ docs/      method · datasets · reproducibility · open_source_release · model
 demo/      Gradio app
 ```
 
-## Status / roadmap
+## Research roadmap
 
-Implemented and tested on CPU: synthetic physics generator with exact ground-truth state, mock +
-real-V-JEPA2 encoder wrappers, multi-layer latent extraction & caching, transformer video decoder
-(modes A/C), linear/MLP probes, reconstruction + physics + latent metrics, baselines/controls, and the
-visualization suite.
+The scientific programme runs in four stages; full detail, status, and results live in
+[ROADMAP.md](ROADMAP.md).
 
-Deferred (typed stubs with documented contracts): latent-diffusion refinement head, optical-flow & FVD
-metrics, DROID/robotics, full steering training, multi-node SLURM launch, HF Hub upload, polished demo.
-See [docs/open_source_release.md](docs/open_source_release.md).
+| Step | Question | Status |
+|------|----------|--------|
+| **1 — Category probe (real video)** | Can linear probes separate physics categories in Physics-IQ latents? | ✅ **Done (positive).** Linear acc 0.91 (z) / 0.90 (raw); raw≈z-score ⇒ separability is real, not a normalization artifact. |
+| **2 — Quantity probe + steering (synthetic)** | Which subspace encodes *velocity*, and can we steer it so the decoded ball visibly speeds up/slows down? | 🔬 **In progress.** Clean moving-ball dataset; velocity/occlusion/equivariance probes done, decoder + steering running on SLURM. |
+| **3 — Transfer to real video** | Do quantity directions learned on synthetic data transfer to real Physics-IQ video? | ◻️ Category-centroid version done (clean **negative**: appearance shift, not physics). Quantity-direction version **TODO**. |
+| **4 — Robotics** | Can we identify and steer the latent difference between achievable vs non-achievable actions? | ◻️ Not started (DROID stubbed). |
+
+**Engineering status.** Implemented and CPU-tested: synthetic physics generators with exact
+ground-truth state, mock + real-V-JEPA2 encoder wrappers, multi-layer latent extraction & caching,
+transformer video decoder (modes A/C), linear/MLP/temporal probes, reconstruction + physics + latent
+metrics, always-on baselines/controls, and the visualization suite. Deferred (typed stubs with
+documented contracts): latent-diffusion refinement head, optical-flow & FVD metrics, DROID/robotics,
+multi-node SLURM launch, HF Hub upload, polished demo. See
+[docs/open_source_release.md](docs/open_source_release.md).
 
 ## Troubleshooting
 

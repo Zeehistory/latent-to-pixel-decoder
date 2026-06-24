@@ -1,5 +1,0 @@
-The following modules were not unloaded:
-  (Use "module --force purge" to unload all):
-
-  1) StdEnv
-/apps/custom/lmod/8.7.48/init/bash: line 169: conda: command not found

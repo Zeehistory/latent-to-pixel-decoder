@@ -1,3 +1,0 @@
-13:40:01 | INFO | decoder=transformer params=410.26M enc_dim=1024 state_dim=1 mode=reconstruct
-Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
-Downloading: "https://download.pytorch.org/models/alexnet-owt-7be5be79.pth" to /home/zss8/.cache/torch/hub/checkpoints/alexnet-owt-7be5be79.pth

@@ -1,3 +1,0 @@
-[steer_category] steering 6 distinct 'fluid_dynamics' scenarios: ['blow-balloon', 'domino-in-juice', 'fill-glass-red-drink', 'glass-stays-same', 'juice-in-water', 'liquid-on-duck']
-[steer_category] method=diff_means/all_layers steer_layers=[6, 12, 18, 23] per-token norms={6: 241.2, 12: 207.7, 18: 163.8, 23: 149.8} alpha(frac)=0..0.3
-[steer_category] fluid_dynamics->solid_mechanics [diff_means/all]: readout monotonicity rho=1.000 over 6 clips -> /home/zss8/project_pi_jks79/zss8/vjepa/outputs/analysis/steer_category/fluid_to_solid_fine

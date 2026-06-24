@@ -1,2 +1,0 @@
-[probe_categories] 10 probe rows; kept=['fluid_dynamics', 'optics', 'solid_mechanics'] dropped={'magnetism': 2, 'thermodynamics': 3} folds=5 majority=0.5924
-[probe_categories] best linear acc=0.9076 (macroF1=0.8972) @layer18 vs shuffled ctrl=0.3917 / majority=0.5924
