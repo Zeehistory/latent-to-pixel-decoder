@@ -42,6 +42,7 @@ python scripts/steer_velocity.py \
     --source_latent_dir "$SOURCE_LATENT_DIR" \
     --target_latent_dir "$TARGET_LATENT_DIR" \
     --checkpoint "$CHECKPOINT" \
+    --output_dir "$OUTPUT_DIR" \
     --target "$TARGET" \
     --all_layers \
     --alphas="-1.5,-1.0,-0.5,0,0.5,1.0,1.5" \
@@ -52,5 +53,12 @@ python scripts/steer_velocity.py \
     data.fps=8 \
     decoder.out_image_size=128 \
     decoder.out_num_frames=32
+rc=$?
 
+# Don't mask failures: a crashed python (e.g. missing arg) must surface as a failed job,
+# not a COMPLETED 0:0 that the collector mistakes for a successful steering run.
+if [ "$rc" -ne 0 ]; then
+    echo "[steer_vel] target=$TARGET FAILED (exit $rc)"
+    exit "$rc"
+fi
 echo "[steer_vel] target=$TARGET done -> $OUTPUT_DIR"
