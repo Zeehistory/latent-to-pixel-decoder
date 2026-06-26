@@ -77,6 +77,18 @@ loss:
   state: 1.0
   trajectory: 5.0
   velocity: 5.0
+  # MOTION FAITHFULNESS (the magnitude-gap fix). `trajectory`/`velocity` above train the auxiliary
+  # STATE HEAD to read position from the latent, but they place NO constraint on where the frame head
+  # actually renders the ball — so the pixel terms (charbonnier/ssim) are still minimized by a static
+  # path-covering smear whose centroid barely moves (decoded speed ~4x too slow; the Step-2 magnitude
+  # gap). `frame_position` ties the DECODED ball's per-frame soft centroid to GT position every frame:
+  # a smear's centroid is pinned at the path midpoint -> large per-frame error, so the only way down is
+  # to render a ball that actually translates at the true speed. `frame_spread` adds light anti-smear
+  # pressure (penalize dark-mass 2nd-moment beyond a compact disk). Magnitudes calibrated on the real
+  # render: frame_position ~0.008-0.037 when wrong, ~0 when faithful.
+  frame_position: 20.0
+  frame_spread: 2.0
+  frame_spread_max_var: 0.004
 
 optim:
   lr: 5.0e-4                # raised from 2e-4: with grad_clip=1 the step size ~lr, so escaping the

@@ -105,6 +105,11 @@ class LossConfig:
     velocity: float = 0.0
     acceleration: float = 0.0
     collision: float = 0.0
+    # Per-frame rendered-ball motion faithfulness (kills temporal-average smear): tie the decoded
+    # ball's soft centroid to GT position every frame; penalize dark mass spread beyond a disk.
+    frame_position: float = 0.0
+    frame_spread: float = 0.0
+    frame_spread_max_var: float = 0.004
 
 
 @dataclass

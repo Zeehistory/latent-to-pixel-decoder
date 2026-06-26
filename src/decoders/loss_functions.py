@@ -108,6 +108,65 @@ def temporal_consistency_loss(pred: torch.Tensor, target: torch.Tensor) -> torch
     return F.l1_loss(dp, dg)
 
 
+def _soft_ball_centroid(frames: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Differentiable per-frame centroid of the dark ball. Returns (centroid (B,T,2), mass (B,T), dark²-weighted spread (B,T)).
+
+    Weights each pixel by ``darkness²`` (= ``(1-gray)²``) so the dark ball (darkness ~0.8 -> w ~0.66)
+    dominates the faint white background (darkness ~0.05 -> w ~0.003) by ~250x per pixel — the centroid
+    tracks the ball, not the frame center. Fully differentiable (soft mass-weighted mean), so it can
+    supervise WHERE the rendered ball is, frame by frame.
+    """
+    gray = frames.mean(dim=2)                                   # (B,T,H,W) ~1 bg, ~0 ball
+    w = (1.0 - gray).clamp(min=0.0) ** 2                        # dark² weighting
+    b, t, h, wd = w.shape
+    xs = torch.linspace(0, 1, wd, device=w.device).view(1, 1, 1, wd)
+    ys = torch.linspace(0, 1, h, device=w.device).view(1, 1, h, 1)
+    mass = w.sum(dim=(2, 3))                                    # (B,T)
+    denom = mass.clamp(min=1e-4)
+    cx = (w * xs).sum(dim=(2, 3)) / denom
+    cy = (w * ys).sum(dim=(2, 3)) / denom
+    cen = torch.stack([cx, cy], dim=-1)                        # (B,T,2)
+    # second moment about the centroid = how spread-out the dark mass is (a path-covering smear is large)
+    var = (w * ((xs - cx[..., None, None]) ** 2 + (ys - cy[..., None, None]) ** 2)).sum(dim=(2, 3)) / denom
+    return cen, mass, var
+
+
+def frame_position_loss(pred: torch.Tensor, target_state: torch.Tensor, state_keys: list[str]) -> torch.Tensor:
+    """MSE between the rendered ball's per-frame centroid and the GT per-frame position.
+
+    THE fix for temporal-average blur: an L1/SSIM pixel loss is happy to render the ball as a static
+    smear covering its whole path (low average pixel error), whose centroid barely moves -> the decoded
+    speed collapses ~4x. This loss ties the *rendered* ball's centroid to the exact GT position at EVERY
+    frame, so the only way down is to render the ball translating at the true speed. Uses GT position
+    (normalized [0,1], same convention as the soft centroid). The moving_ball dataset names the columns
+    ``pos_x``/``pos_y``; multi-object synthetic_physics uses ``obj0_pos_x``/``obj0_pos_y`` — accept both.
+    """
+    def _find(*names: str) -> int | None:
+        for n in names:
+            if n in state_keys:
+                return state_keys.index(n)
+        return None
+
+    xi = _find("pos_x", "obj0_pos_x")
+    yi = _find("pos_y", "obj0_pos_y")
+    if xi is None or yi is None:
+        return pred.new_zeros(())
+    gt = torch.stack([target_state[..., xi], target_state[..., yi]], dim=-1)  # (B,T,2)
+    cen, _, _ = _soft_ball_centroid(pred)
+    return F.mse_loss(cen, gt)
+
+
+def frame_spread_loss(pred: torch.Tensor, max_var: float = 0.01) -> torch.Tensor:
+    """Penalize a rendered dark mass that is more SPREAD OUT than a compact disk (anti path-smear).
+
+    Only penalizes spread in EXCESS of ``max_var`` (a disk of radius ~0.11 has 2nd moment ~0.006), so a
+    correct compact ball is free while a path-covering smear is pushed down. Complements the centroid
+    loss: centroid says *where*, spread says *don't smear across the trajectory*.
+    """
+    _, _, var = _soft_ball_centroid(pred)
+    return (var - max_var).clamp(min=0.0).mean()
+
+
 def masked_state_loss(
     pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
 ) -> torch.Tensor:
@@ -240,6 +299,13 @@ class DecoderLoss(torch.nn.Module):
             if c.lpips != 0.0:
                 add("lpips", c.lpips, lpips_loss(pred_frames, target_frames))
             add("temporal", c.temporal_consistency, temporal_consistency_loss(pred_frames, target_frames))
+            # Per-frame rendered-ball position supervision (kills temporal-average blur). Uses the raw
+            # rendered frames + GT position; independent of the target compression above.
+            if target_state is not None and state_keys is not None:
+                add("frame_position", getattr(c, "frame_position", 0.0),
+                    frame_position_loss(pred_frames, target_state, state_keys))
+            add("frame_spread", getattr(c, "frame_spread", 0.0),
+                frame_spread_loss(pred_frames, getattr(c, "frame_spread_max_var", 0.01)))
 
         if pred_state is not None and target_state is not None and state_keys is not None:
             add("state", c.state, masked_state_loss(pred_state, target_state, state_mask))

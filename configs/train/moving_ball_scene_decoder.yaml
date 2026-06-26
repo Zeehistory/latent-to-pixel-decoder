@@ -68,6 +68,16 @@ loss:
   state: 1.0
   trajectory: 5.0
   velocity: 5.0
+  # MOTION FAITHFULNESS (the Step-2 magnitude-gap fix). The diff-vector steering held ρ=0.80 but decoded
+  # speed was ~4x too slow: even reconstructing the real fast clip H_b rendered a static path-covering
+  # SMEAR (centroid barely moves) because charbonnier/ssim reward the temporal average and trajectory/
+  # velocity only constrain the auxiliary STATE HEAD, not the rendered pixels. `frame_position` ties the
+  # decoded ball's per-frame soft centroid to GT obj0_pos every frame (a smear's centroid is pinned at
+  # the path midpoint -> large per-frame error), forcing a ball that truly translates. `frame_spread`
+  # adds anti-smear pressure. Validated on the renderer: smear total 1.88 vs faithful 0.09 (was ~tied).
+  frame_position: 20.0
+  frame_spread: 2.0
+  frame_spread_max_var: 0.004
 
 optim:
   lr: 5.0e-4

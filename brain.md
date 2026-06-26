@@ -104,7 +104,7 @@ How: start with **linear + MLP** probes.
 `[z_1..z_T]` and/or GRU — clip-pooling threw away the temporal axis where dynamics live (`8×1024`
 temporal-preserving probe is the natural next rep), (c) revisit the dropped thermo/magnetism categories.
 
-### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — VELOCITY-FIRST probes DONE; decoder collapse FIXED; steering: readout steerable (ρ=1.0) but decoded pixels DON'T move (decoder bottleneck, same as Step 1)
+### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — DONE: faithful pixel-level velocity steering achieved (held-out ρ=0.90, decoded-vs-GT r=0.95) via difference-vector edit + per-frame frame_position decoder loss; the magnitude gap that blocked Step 1/2 is CLOSED
 Physics-IQ has no specific labels, so generate synthetic datasets specializing in e.g. solid mechanics
 (freefall, projectile, bounce) and fluid dynamics, with **exact** ground-truth state. Then train probes
 for **velocity, acceleration, gravity, …** → answers precisely *which subspace encodes which quantity*.
@@ -268,6 +268,36 @@ Steered 20 held-out test scenes (per-pair Δ).
   darkness>0.5 threshold drops faint decoded balls to NaN and may under-read blurry-blob speed — worth a
   softer tracker before over-concluding. Artifacts: `outputs/analysis/moving_ball_scene/diff_steer/`.
 
+**MAGNITUDE GAP CLOSED (2026-06-26 eve): faithful pixel-level velocity steering achieved.**
+The bottleneck was the decoder's *objective*, not its capacity or the steering vector. The pixel loss was
+minimized by rendering a static path-covering SMEAR (its centroid barely moves → tracker reads it slow);
+even reconstructing the real fast clip H_b was ~4× too slow. Fix: a per-frame **`frame_position` loss**
+that ties the decoded ball's differentiable soft centroid to the GT `obj0_pos` every frame (a smear's
+centroid is pinned at the path midpoint → large per-frame error), plus a light `frame_spread` anti-smear
+term (`src/decoders/loss_functions.py`; weights in `moving_ball_scene_decoder.yaml`: frame_position=20,
+frame_spread=2). `trajectory`/`velocity` only constrained the auxiliary STATE HEAD, never the rendered
+pixels — this closes that gap. CPU-validated first (`tests/test_frame_position_loss.py`, 6 green: soft
+centroid recovers GT pos <0.01px; smear total loss 1.88 vs faithful 0.09). Retrained
+`moving_ball_scene_decoder_fp` to step 6000 (b200, ~45 min, same 208M decoder). Re-measured on the 20
+held-out test scenes:
+
+| α | −0.5 | 0.0 (=H_a) | 0.5 | 1.0 (=H_b) | 1.5 |
+|---|------|------|------|------|------|
+| decoded speed | 0.0207 | 0.0199 | 0.0300 | 0.0395 | 0.0431 |
+| GT-interp | 0.0095 | 0.0197 | 0.0299 | 0.0401 | 0.0503 |
+
+- **Monotonicity ρ = 0.90** (was 0.80) and **decoded-vs-GT r = 0.952** (was 0.34) — gap CLOSED in the
+  on-manifold α∈[0,1] regime. α=0 reconstructs v_a to ~3.6%, α=1 reconstructs v_b to ~1.9% — the decoder
+  renders the *right speed*, not just the right ordering. **0/100 NaN** decoded points (was 2 + ~8 flat) —
+  clean disks, the tracker confound is moot.
+- **Honest caveats:** extrapolation (α<0, α>1) **saturates** — decoded doesn't reach GT's extrapolated
+  speeds (expected; off-manifold beyond the trained velocity range). **mean-Δ ρ = 0.30** — the single
+  global averaged "speed-up vector" still does NOT generalize; per-pair same-scene Δ remains essential
+  (the velocity edit is scene-local in token space). Capacity was NOT the limiter (same decoder) → good
+  sign for scaling. Artifacts: `outputs/analysis/moving_ball_scene/diff_steer_fp_last/` (summary json,
+  controllability plot, per-scene filmstrips + α0→α1.5 mp4s); decoder
+  `outputs/runs/moving_ball_scene_decoder_fp/checkpoints/last.pt`.
+
 ### STEP 3 — transfer synthetic directions to real video (~1–2 weeks · target by 2026-07-28) — category version DONE (negative); quantity version TODO
 Test whether directions learned from **synthetic** data transfer to **real** Physics-IQ video. Learn a
 subspace for e.g. "velocity," steer it in Physics-IQ latents, decode with the Transformer decoder, and
@@ -302,6 +332,28 @@ show the principle transfers/generalizes rather than overfitting one model.
 ---
 
 ## Changelog
+
+- **2026-06-26 (eve)** — Step 2 MAGNITUDE GAP CLOSED → faithful pixel-level velocity steering. The
+  remaining gap (decoded ball ~4× too slow, decoded-vs-GT r=0.34) was the decoder's OBJECTIVE, not its
+  capacity or the steering vector: the pixel loss was minimized by a static path-covering smear (centroid
+  barely moves), and `trajectory`/`velocity` only constrained the auxiliary state head, never the rendered
+  pixels. Added `frame_position_loss` (ties the decoded ball's differentiable soft centroid to GT
+  `obj0_pos` every frame) + `frame_spread_loss` (anti-smear) in `src/decoders/loss_functions.py`; schema in
+  `src/utils/config.py`; weights (frame_position=20, frame_spread=2, frame_spread_max_var=0.004) in both
+  `moving_ball_scene_decoder.yaml` and `moving_ball_decoder_large.yaml`. CPU-validated before any GPU
+  (`tests/test_frame_position_loss.py`, 6 green: soft centroid matches the renderer's GT pos to <0.01px;
+  static smear scores total loss 1.88 vs 0.09 for a faithful render). NB: the prior `obj0_pos_x` vs
+  `pos_x` "bug" was a non-issue — `_state_keys()` prefixes `obj0_`, so the original lookup was correct; the
+  term was simply inert because its config weight defaulted to 0. Retrained `moving_ball_scene_decoder_fp`
+  to step 6000 (b200 via gpu_devel-for-measure / scavenge-for-train, ~45 min, same 208M decoder). Held-out
+  (20 test scenes): **monotonicity ρ=0.90** (was 0.80), **decoded-vs-GT r=0.952** (was 0.34); α=0/α=1
+  reconstruct v_a/v_b to ~3.6%/1.9%; aggregate decoded 0.0199/0.0300/0.0395 vs GT 0.0197/0.0299/0.0401 at
+  α=0/0.5/1.0; **0 NaN** (was 2 untrackable + ~8 flat). Honest caveats: α∉[0,1] extrapolation saturates
+  (off-manifold); mean-Δ global vector still weak (ρ=0.30) — per-pair same-scene Δ essential. Scheduling
+  lesson: the measurement only loads the tiny TEST cache (~80 clips) so it fits gpu_devel's 60G cap and
+  schedules instantly — don't wait ~17h on scavenge backfill for a 5-min decode. Artifacts:
+  `outputs/analysis/moving_ball_scene/diff_steer_fp_last/`; decoder
+  `outputs/runs/moving_ball_scene_decoder_fp/checkpoints/last.pt`.
 
 - **2026-06-26** — Step 2 DIFFERENCE-VECTOR STEERING built + pilot (supervisor's on-manifold proposal; first pixel-level win). New `scene_velocity` dataset (`src/data/moving_ball.py`): scenes of 4 clips with bit-identical first frame + direction, only speed varies; 256²/16fr → encoder grid confirmed **(8,16,16)=256 tokens, H∈ℝ^{8×256×1024}** (resolves the "196" — it's 256). New `scripts/steer_velocity_diff.py`: Δ=H_b−H_a between two real same-scene clips, decode H_a+α·Δ. New configs (`moving_ball_scene.yaml`, `moving_ball_scene_decoder.yaml` — smaller depth-12 decoder, carries the 3 loss fixes + co-training) and SLURM (`slurm_{extract,train,steer}_scene.sh`). **Pilot (40 scenes, 1500 steps, 10 test):** per-pair decoded-speed monotonicity **ρ=0.80** (decoded ball speeds up +60% from α=0→1) — FIRST time pixels track the steering knob (probe approach was flat ~0.0087). Remaining gap: decoder compresses the speed range ~2–3× (decoded-vs-GT r=0.33, rough/blurry ball at 1500 steps). mean-Δ global vector FAILS (ρ=−0.90 — per-token Δ is scene-local; averaging across scenes blurs it). Full run (300/100, 6000 steps) RUNNING to close the magnitude gap. Bugs fixed en route: `clips_per_scene` missing from `DataConfig` schema; SLURM scripts now `exit $STATUS` (a Python failure had passed `afterok`); `--alphas=` form (leading-dash value). Scheduling: train on **gpu_devel** (instant, fast GPU; 1-job/user cap) + dependents on scavenge_gpu — internalized as a FAST-TURNAROUND PLAYBOOK in memory. **FULL RUN (300/100, 6000 steps) DONE — honest result: ρ=0.80 HOLDS on 20 held-out scenes but the magnitude gap did NOT close (r=0.34, unchanged; aggregate decoded ball barely speeds 0.0073→0.0101 vs GT 0.020→0.040). Heterogeneous: ~6–7/20 scenes show real 2–3× decoded speed-up, ~8 flat, 2 untrackable (NaN). Method is directionally better than probes (pixels DO move monotonically) but does NOT render faithful velocity magnitude — bottleneck is decoder faithfulness, not the steering vector; more scale didn't help. Next lever = decoder rendering, not data. Also OOM-fixed num_workers 4→0 mid-run.** Artifacts: `outputs/analysis/moving_ball_scene/diff_steer{,_pilot}/`.
 
