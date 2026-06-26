@@ -29,6 +29,35 @@ def l1_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return F.l1_loss(pred, target)
 
 
+def foreground_weighted_charbonnier(
+    pred: torch.Tensor, target: torch.Tensor, gamma: float = 10.0, eps: float = 1e-3,
+    fg_thresh: float = 0.5,
+) -> torch.Tensor:
+    """Charbonnier reconstruction that scores the (dark) foreground separately from the background.
+
+    On the clean moving-ball scene the object is a small dark disk (~2% of pixels) on a white
+    background, so an *area-averaged* pixel loss is minimized by predicting a blank frame and the
+    decoder collapses (ball dropped entirely). We instead compute the charbonnier **mean over the
+    foreground** and **mean over the background** independently and return ``bg + gamma * fg`` so the
+    tiny ball contributes on equal footing with the whole background regardless of its area.
+
+    Foreground membership uses a **hard darkness threshold** (``1-target > fg_thresh``). An earlier
+    *soft* darkness weight (``w = 1-target``) failed: the background's residual darkness (~0.05) leaks
+    into the foreground denominator (98% of pixels × 0.05 >> 2% of pixels × 0.8), diluting the ball
+    gradient ~4x, so the decoder still collapsed to a uniform frame (observed: fg4 step_300 rel-darkness
+    decayed 0.039→0.01). With a hard mask the foreground mean is taken over ball pixels ONLY, so a
+    uniform-collapse prediction incurs the full ``gamma * ~0.77`` foreground penalty (vs a diluted
+    ~0.19) and the only way down is to actually localize and darken the ball.
+    """
+    err = torch.sqrt((pred - target) ** 2 + eps**2)                    # (B,T,C,H,W)
+    dark = (1.0 - target.mean(dim=2, keepdim=True)).clamp(min=0.0)     # (B,T,1,H,W) target darkness
+    fg = (dark > fg_thresh).to(err.dtype)                              # hard ball mask (no bg leak)
+    bg = 1.0 - fg
+    fg_err = (err * fg).sum() / fg.expand_as(err).sum().clamp(min=1.0)  # mean error on the ball ONLY
+    bg_err = (err * bg).sum() / bg.expand_as(err).sum().clamp(min=1.0)  # mean error on the background
+    return bg_err + gamma * fg_err
+
+
 def _gaussian_window(size: int, sigma: float, channels: int, device) -> torch.Tensor:
     coords = torch.arange(size, device=device).float() - size // 2
     g = torch.exp(-(coords**2) / (2 * sigma**2))
@@ -196,7 +225,16 @@ class DecoderLoss(torch.nn.Module):
                     target_frames.flatten(0, 1), size=pred_frames.shape[-2:],
                     mode="bilinear", align_corners=False,
                 ).reshape(pred_frames.shape)
+            lo, hi = getattr(c, "target_lo", 0.0), getattr(c, "target_hi", 1.0)
+            if lo != 0.0 or hi != 1.0:
+                # compress targets off the sigmoid boundary so the decoder optimum sits at a finite,
+                # non-saturated logit (keeps gradients alive -> escapes uniform-collapse on white scenes)
+                target_frames = lo + (hi - lo) * target_frames
             add("charbonnier", c.charbonnier, charbonnier_loss(pred_frames, target_frames))
+            if getattr(c, "foreground", 0.0) != 0.0:
+                add("foreground", c.foreground,
+                    foreground_weighted_charbonnier(pred_frames, target_frames,
+                                                    getattr(c, "foreground_gamma", 50.0)))
             add("ssim", c.ssim, ssim_loss(pred_frames, target_frames))
             add("ms_ssim", c.ms_ssim, ms_ssim_loss(pred_frames, target_frames))
             if c.lpips != 0.0:

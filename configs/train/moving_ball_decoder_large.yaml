@@ -45,14 +45,42 @@ data:
   seed: 0
 
 loss:
-  charbonnier: 1.0
-  ssim: 0.25
-  ms_ssim: 0.25
+  # The ball is ~2% of the frame on a white background, so an unweighted pixel loss is minimized by a
+  # blank-white prediction and the decoder collapses (ball dropped — see diag: decoded min 0.996).
+  # `foreground` up-weights dark (ball) pixels so the object is actually reconstructed.
+  # ROOT CAUSE of prior collapses (white @gamma=1, dark @gamma=10): the sigmoid output can only match a
+  # pure-white (1.0) target by driving its logit to +inf, where sigmoid saturates (grad ~1e-3) and the
+  # small-object foreground signal is too weak to pull ball-pixels back -> uniform collapse, loss pinned
+  # flat at ~0.85. Tuning gamma only swaps WHICH uniform minimum wins; it never removes the saturation
+  # trap. The real fix: compress targets off the {0,1} boundary so the bg optimum is a finite,
+  # non-saturated logit (~2.9, grad ~0.05, ~50x livelier) and gradients stay alive to render the ball.
+  target_lo: 0.05           # ball target 0.15 -> 0.185 ; white bg 1.0 -> 0.95 (still clearly "white",
+  target_hi: 0.95           # tracker uses relative darkness so contrast 0.185-vs-0.95 tracks fine)
+  charbonnier: 0.1          # light area-avg term: keeps the (large) background pinned to white
+  foreground: 1.0
+  foreground_gamma: 1.0     # bg_err + 1*fg_err separate-mean: foreground & background regions weighted
+                            # EQUALLY regardless of area, so neither white- nor dark-collapse is a cheap
+                            # minimum (both cost ~0.8 vs ~0 for a correct render). With the saturation
+                            # trap removed (target compression above), gradients can now actually descend
+                            # to localize the dark ball instead of parking at a uniform minimum.
+  ssim: 0.2                 # rewards spatial structure -> penalizes both uniform collapses
+  ms_ssim: 0.2
   lpips: 0.0
-  temporal_consistency: 0.5
+  temporal_consistency: 0.25
+  # STATE CO-TRAINING (forces latent conditioning). With pixel-loss only, the decoder ignored the
+  # per-clip latent and rendered a dataset-AVERAGE ball (identical decode across clips, loss plateaued
+  # ~0.65) because per-clip position/velocity is a low-variance latent subspace plain reconstruction
+  # never learns to use. These auxiliary heads regress per-frame ground-truth state from the SAME query
+  # features the frame head reads, so the decoder is forced to encode WHERE the ball is -> the frame
+  # head can then place it. `trajectory` (per-frame position) is the localization driver; `velocity`
+  # ties in the steering target; `state` is a mild all-column regularizer.
+  state: 1.0
+  trajectory: 5.0
+  velocity: 5.0
 
 optim:
-  lr: 2.0e-4
+  lr: 5.0e-4                # raised from 2e-4: with grad_clip=1 the step size ~lr, so escaping the
+                            # white-collapse plateau (where loss sat flat at ~0.85) is gated by LR.
   weight_decay: 0.05
   betas: [0.9, 0.999]
   warmup_steps: 100

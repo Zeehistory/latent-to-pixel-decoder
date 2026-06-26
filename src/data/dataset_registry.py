@@ -126,6 +126,7 @@ class MovingBallDataset(Dataset):
             radius_range=tuple(getattr(cfg, "radius_range", [0.07, 0.10])),
             fixed_speed=float(getattr(cfg, "fixed_speed", 0.022)),
             camera_rotation=bool(getattr(cfg, "camera_rotation", False)),
+            clips_per_scene=int(getattr(cfg, "clips_per_scene", 4)),
             seed=cfg.seed,
         )
         self.num_clips = cfg.num_clips
@@ -144,14 +145,23 @@ class MovingBallDataset(Dataset):
             clip = self.gen.generate(idx)
             self._cache[idx] = clip
         state, mask = _pad_state(clip.state, self.state_dim)
+        # For scene_velocity, encode scene + speed-rank into the id/category so the difference-vector
+        # steering can pair same-scene clips (id="scene00007_v2", category="scene00007"). Other
+        # scenarios keep the flat "<scenario>_<idx>" id.
+        if "scene" in clip.meta:
+            sid = f"scene{clip.meta['scene']:05d}_v{clip.meta['rank']}"
+            category = f"scene{clip.meta['scene']:05d}"
+        else:
+            sid = f"{clip.meta['scenario']}_{idx:05d}"
+            category = clip.meta["scenario"]
         return {
-            "id": f"{clip.meta['scenario']}_{idx:05d}",
+            "id": sid,
             "frames": clip.frames,
             "encoder_input": self.transform(clip.frames),
             "state": state,
             "state_mask": mask,
             "state_keys": clip.state_keys,
-            "category": clip.meta["scenario"],
+            "category": category,
             "meta": clip.meta,
         }
 

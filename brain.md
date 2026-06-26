@@ -104,7 +104,7 @@ How: start with **linear + MLP** probes.
 `[z_1..z_T]` and/or GRU — clip-pooling threw away the temporal axis where dynamics live (`8×1024`
 temporal-preserving probe is the natural next rep), (c) revisit the dropped thermo/magnetism categories.
 
-### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — VELOCITY-FIRST probes DONE, steering BLOCKED
+### STEP 2 — synthetic datasets with exact labels (~2 weeks · target by 2026-07-14; start data gen now) — VELOCITY-FIRST probes DONE; decoder collapse FIXED; steering: readout steerable (ρ=1.0) but decoded pixels DON'T move (decoder bottleneck, same as Step 1)
 Physics-IQ has no specific labels, so generate synthetic datasets specializing in e.g. solid mechanics
 (freefall, projectile, bounce) and fluid dynamics, with **exact** ground-truth state. Then train probes
 for **velocity, acceleration, gravity, …** → answers precisely *which subspace encodes which quantity*.
@@ -157,7 +157,7 @@ direction-R² (recover angle from 2D subspace), and per-pair equivariance error 
 6. (needs decoder first) `TARGET=speed sbatch slurm_steer_velocity.sh`
 Or in one go: `source scripts/slurm_step2_velocity_pipeline.sh`
 
-**Status:** RUN ON CLUSTER (2026-06-24). Velocity/occlusion/equivariance probes done; steering did NOT complete (see digest). See `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
+**Status:** RUN ON CLUSTER (2026-06-24). Probes done (velocity/occlusion/equivariance). Decoder background-collapse FIXED this session (target compression + hard-mask foreground + state co-training → ball renders, decoder partially conditions on per-clip latent). **Steering ran but FAILED the milestone:** readout perfectly steerable (ρ=1.000 all targets) but decoded pixel-tracked velocity is essentially flat across α (speed ρ=0.64 / vel_x 0.32 / vel_y 0.25 are rank-corr on near-flat noisy 6-clip curves; decoded speed sits ~0.0087 for all α vs GT range 0.008–0.038). The decoder renders a roughly-fixed slow ball and does NOT translate a steered velocity subspace into changed motion — the SAME readout-moves-pixels-don't pattern as Step 1 category steering (see line ~62). Decoder faithfulness is the bottleneck, not subspace decodability. See `outputs/analysis/moving_ball_velocity/steer_{speed,vel_x,vel_y}/`.
 
 | layer | clip_pool vel R² | temporal vel R² | temporal_diff vel R² |
 |-------|------------------|-----------------|----------------------|
@@ -171,6 +171,80 @@ Or in one go: `source scripts/slurm_step2_velocity_pipeline.sh`
 
 **Older MuJoCo/Genesis engines:** `mujoco_solid`, `genesis_fluid` still in repo (use `slurm_train_probe.sh`
 for the broader quantity-probe table). Genesis API may need version-specific tweaks (`# GENESIS API` lines).
+
+#### Difference-vector steering — supervisor proposal (2026-06-26, BUILT)
+
+**Why:** probe-direction steering hit a wall (readout ρ=1.0 but pixels don't move — same as Step 1). The
+probe direction is an *abstract* axis fit to predict a number; pushing the latent along it goes
+**off-manifold**, and the decoder won't render an off-manifold perturbation. The PI's fix (LLM
+activation-steering analogy): derive the steering vector from **two real encoded videos** of the *same
+scene* that differ only in speed, so the difference is the velocity factor in the model's own
+coordinates, and interpolating between them stays **on-manifold** (the endpoints are clips the decoder
+was trained to reconstruct).
+
+    H_a = E(slow), H_b = E(fast)   [identical first frame + direction, only speed differs]
+    Δ = H_b − H_a                  → decode H_a + α·Δ ; α=0→v_a, α=1→v_b, α∉[0,1] extrapolates
+
+**Dataset** (`scene_velocity` scenario in `src/data/moving_ball.py`; `configs/data/moving_ball_scene.yaml`):
+16 frames, FPS=4, **256×256** (→ VJEPA2-L grid 8×16×16 = 8×256 tokens, H∈ℝ^{8×256×1024} per layer, matching
+the spec — the "196" in the PI's note is 14², a 224² model; we lock 256²→256). White bg, **one ball,
+FIXED radius (0.11, ~4% of frame — deliberately NOT small, to dodge the background-collapse trap) and
+colour**. Organized into **scenes**: `clips_per_scene=4` clips share a bit-identical first frame + motion
+direction and differ only in speed (rank 0=slowest..3=fastest). Across scenes: start position, direction,
+and the 4 speeds randomize. Scene-disjoint splits via distinct seeds (train=0/val=1/test=2). IDs encode
+scene+rank (`scene00007_v2`) so steering can pair same-scene clips. Validated locally: first-frame max
+deviation = 0.0, monotone speeds, same direction, ball stays in-frame, train/test scenes disjoint.
+
+**Decoder** (`configs/train/moving_ball_scene_decoder.yaml`): the same transformer decoder but **smaller**
+(depth 12 not 24 — this data is far simpler than Physics-IQ, per the PI), 256px/16fr output, decoding the
+full multi-scale latent state `[6,12,18,23]`. Carries forward **all three hard-won loss fixes** (target
+compression 0.05/0.95, hard-mask foreground, **state/trajectory/velocity co-training** — the co-training
+is what forces the decoder to actually use the per-clip latent instead of rendering an average ball).
+
+**Steering** (`scripts/steer_velocity_diff.py`): pairs same-scene test clips, forms per-layer Δ=H_b−H_a,
+decodes H_a+α·Δ, re-tracks the decoded ball, and reports **decoded-speed-vs-α** (monotonicity ρ +
+decoded-vs-GT-interpolated-speed linearity r). Two variants: **per-pair** (each scene's own Δ, the
+on-manifold edit — primary) and **mean-Δ** (one vector averaged across scenes, LLM-style, applied to
+held-out H_a — tests global generalization). Why this should beat probe-steering: α∈[0,1] interpolates
+two reconstructable latents, so endpoints are guaranteed faithful and the path stays near the manifold.
+
+**SLURM** (scavenge_gpu + `--requeue` + NFS paths, per scheduling memory):
+`slurm_extract_scene.sh` (SPLIT=train/val/test → seed+size), `slurm_train_scene.sh` (resume-safe),
+`slurm_steer_scene.sh`. Pilot-first: 40 train scenes → 1500 steps → steer 10 test scenes, validate the
+ball renders + α-sweep moves it, THEN scale to 300/–/100 (disk-limited; project vol at 97%, val skipped).
+
+**Status (2026-06-26): BUILT + PILOT DONE (encouraging) + full run RUNNING.**
+
+**PILOT RESULTS** (40 train scenes, depth-12 decoder @ 1500 steps, 10 held-out test scenes; encoder grid
+confirmed (8,16,16)=256 tokens). Decoder trained cleanly — loss descended to ~0.3 (NO collapse), and
+trajectory/velocity co-training losses fell to ~1e-3, i.e. the decoder **conditions on the per-clip
+latent** (localizes the ball; no average-blob). Difference-vector steering, per-pair (each scene's own
+Δ=H_b−H_a), decoded ball speed vs α:
+
+| α | −0.5 | 0.0 (=H_a) | 0.5 | 1.0 (=H_b) | 1.5 |
+|---|------|------|------|------|------|
+| decoded speed | 0.0116 | 0.0116 | 0.0161 | 0.0185 | 0.0168 |
+| GT-interp speed | 0.0084 | 0.0193 | 0.0301 | 0.0410 | 0.0518 |
+
+- **Per-pair decoded-speed monotonicity ρ = 0.80** (decoded ball speeds UP +60% from α=0→1). **This is the
+  first time pixel motion tracks the steering knob** — the probe approach was FLAT (~0.0087 for all α,
+  see above). The PI's on-manifold hypothesis (interpolate two real latents, not push a probe axis) is
+  **supported in direction**. Filmstrips show the decoded ball visibly larger/more-displaced at higher α.
+- **Magnitude gap (the remaining issue): decoded-vs-GT r = 0.33.** The decoder **compresses the speed
+  range** ~2–3× and renders a rough/smeared ball (under-trained 1500-step pilot) — centroid of a blurry
+  blob under-moves vs the crisp GT. Endpoint fidelity is off too (at α=0=real slow clip, decoded 0.0116 vs
+  GT 0.019). Expect the full run (300 scenes × 6000 steps) to sharpen the ball and widen the rendered range.
+- **mean-Δ variant FAILS (ρ = −0.90)** — a single Δ averaged across scenes anti-correlates. Confirms the
+  spatial-misalignment caveat: per-token Δ is localized to each scene's ball path, so averaging across
+  scenes (different positions/directions) blurs it to noise. **Per-pair, same-scene Δ is the right method;
+  the LLM-style global vector does NOT transfer here.** (Informative negative for the PI.)
+- Artifacts: `outputs/analysis/moving_ball_scene/diff_steer_pilot/` (controllability plot, per-scene
+  filmstrips + α=0→1.5 mp4s, summary json).
+
+**FULL RUN (RUNNING, 2026-06-26):** 300 train scenes (1200 clips) + 100 test (400), depth-12 decoder @ 6000
+steps. Extracts on scavenge_gpu, train on **gpu_devel** (fast Blackwell/h200 GPU, instant start — see the
+fast-turnaround playbook in scheduling memory), steer on scavenge_gpu (20 test scenes). Goal: close the
+magnitude gap and confirm ρ holds at scale. RESULTS: _pending._
 
 ### STEP 3 — transfer synthetic directions to real video (~1–2 weeks · target by 2026-07-28) — category version DONE (negative); quantity version TODO
 Test whether directions learned from **synthetic** data transfer to **real** Physics-IQ video. Learn a
@@ -206,6 +280,10 @@ show the principle transfers/generalizes rather than overfitting one model.
 ---
 
 ## Changelog
+
+- **2026-06-26** — Step 2 DIFFERENCE-VECTOR STEERING built + pilot (supervisor's on-manifold proposal; first pixel-level win). New `scene_velocity` dataset (`src/data/moving_ball.py`): scenes of 4 clips with bit-identical first frame + direction, only speed varies; 256²/16fr → encoder grid confirmed **(8,16,16)=256 tokens, H∈ℝ^{8×256×1024}** (resolves the "196" — it's 256). New `scripts/steer_velocity_diff.py`: Δ=H_b−H_a between two real same-scene clips, decode H_a+α·Δ. New configs (`moving_ball_scene.yaml`, `moving_ball_scene_decoder.yaml` — smaller depth-12 decoder, carries the 3 loss fixes + co-training) and SLURM (`slurm_{extract,train,steer}_scene.sh`). **Pilot (40 scenes, 1500 steps, 10 test):** per-pair decoded-speed monotonicity **ρ=0.80** (decoded ball speeds up +60% from α=0→1) — FIRST time pixels track the steering knob (probe approach was flat ~0.0087). Remaining gap: decoder compresses the speed range ~2–3× (decoded-vs-GT r=0.33, rough/blurry ball at 1500 steps). mean-Δ global vector FAILS (ρ=−0.90 — per-token Δ is scene-local; averaging across scenes blurs it). Full run (300/100, 6000 steps) RUNNING to close the magnitude gap. Bugs fixed en route: `clips_per_scene` missing from `DataConfig` schema; SLURM scripts now `exit $STATUS` (a Python failure had passed `afterok`); `--alphas=` form (leading-dash value). Scheduling: train on **gpu_devel** (instant, fast GPU; 1-job/user cap) + dependents on scavenge_gpu — internalized as a FAST-TURNAROUND PLAYBOOK in memory. Artifacts: `outputs/analysis/moving_ball_scene/diff_steer_pilot/`.
+
+- **2026-06-24 (eve)** — Step 2 DECODER COLLAPSE FIXED + steering re-run (honest result: milestone NOT met). The moving-ball decoder had collapsed to a blank frame (loss pinned flat ~0.84), blocking steering. Root-caused & fixed THREE stacked issues: (1) **sigmoid saturation** — pure-white (1.0) targets drive the output logit to +∞ where grad dies; fixed via target compression `loss.target_lo/hi=0.05/0.95` (finite optimum, live grads). (2) **foreground-gradient dilution** — soft darkness mask leaked bg into the fg denominator (~4× weaker ball grad); fixed via HARD mask in `foreground_weighted_charbonnier`. After (1)+(2) the ball renders but the decoder learned a dataset-AVERAGE ball (latent-blind, loss plateaued ~0.65). (3) **latent-blindness** — fixed via STATE CO-TRAINING (`loss.state=1, trajectory=5, velocity=5`; state head already built in reconstruct mode) → decoder now partially conditions on per-clip latent (decoded vel_y tracks GT sign by step 600). Trained `moving_ball_decoder_fg6` to step 3000 (LR decayed; effectively converged). **Steering (step_3000):** readout ρ=1.000 for speed/vel_x/vel_y, but decoded-measured ρ=0.64/0.32/0.25 are rank-corr on NEAR-FLAT noisy 6-clip curves — decoded speed sits ~0.0087 for ALL α (GT range 0.008–0.038). I.e. the velocity subspace is perfectly steerable in the readout but the decoder does NOT render the steered velocity as pixel motion — same "readout moves, pixels don't" bottleneck as Step 1. **The PI's milestone (visually confirm the ball changes speed under steering) is NOT achieved; the decoder's faithfulness is the limiter, not subspace decodability.** Infra fixes this session: decoder training needs `--mem=192G` + `train.num_workers=0` (per-worker unbounded `LatentDataset._shard_cache` OOMs; ~100GB cache); OOM mid-`torch.save` corrupts that checkpoint (resume from prior); cleaned ~300G of dead-run checkpoints (project quota was full → training died on Errno 122). Artifacts: `outputs/analysis/moving_ball_velocity/steer_{speed,vel_x,vel_y}/` (filmstrips, mp4s, summary json); decoder `outputs/runs/moving_ball_decoder_fg6/checkpoints/step_3000.pt`. Code: `src/decoders/loss_functions.py`, `src/utils/config.py`, `configs/train/moving_ball_decoder_large.yaml` (all uncommitted).
 
 - **2026-06-24** — Step 2 velocity-first RUN on cluster (bouchet, gpu_rtx6000). Velocity probe: vel linear R²: clip_pool 0.996@L10, temporal 0.998@L23 (controls collapse: shuf -0.738, rand -0.582). Occlusion: hidden-token vel R² 0.9975@L9 (visible 0.9986). Equivariance: max direction-R² 0.985@L8, circ 0.954; best equivErr 0.571@L11. Steering: speed: readout ρ=1.000, decoded-measured ρ=—; vel_x: readout ρ=1.000, decoded-measured ρ=—; vel_y: readout ρ=1.000, decoded-measured ρ=—. Fixes applied this run: probe/decoder/steer mem 64G→192G, shard-cache eviction between layers, LatentDataset cache pruned to selected layers (decoder OOM), re-extracted equivariance latents (prior cache had no metadata.parquet). Full numbers in `outputs/analysis/STEP2_RESULTS_DIGEST.md`.
 

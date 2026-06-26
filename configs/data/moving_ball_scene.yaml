@@ -1,0 +1,29 @@
+# Difference-vector steering dataset (supervisor's 2026-06-26 proposal).
+# Scenes of `clips_per_scene` clips that share an IDENTICAL first frame + motion direction and differ
+# ONLY in speed (slow->fast by rank). Encoding two same-scene clips gives H_a, H_b whose difference
+# H_b - H_a isolates the velocity factor; decoding H_a + alpha*(H_b - H_a) steers the ball's speed in
+# pixel space ON-MANIFOLD. White background, ONE ball, FIXED radius + colour (per spec).
+#
+# Spec: 16 frames, FPS=4, 256x256  ->  VJEPA2-L latent grid (T'=8, 16x16=256 spatial), H in R^{8x256x1024}.
+# Ball is deliberately NOT small (radius 0.11 -> ~56px disk on 256px, ~4% of frame) to avoid the
+# background-collapse failure mode the earlier 2%-ball decoder hit.
+#
+# Splits are scene-disjoint via distinct seeds (train=0 / val=1 / test=2) and set per-split at submit:
+#   train: num_clips=2000 seed=0   (500 scenes x 4)
+#   val:   num_clips=400  seed=1   (100 scenes x 4)
+#   test:  num_clips=400  seed=2   (100 scenes x 4)
+name: moving_ball
+root: null
+image_size: 256
+num_frames: 16
+fps: 4
+scenario: scene_velocity
+clips_per_scene: 4
+categories: all
+split: train
+num_clips: 2000
+# per-frame normalized speed (at FPS=4). Capped so motion is clearly visible over 16 frames but the
+# ball never leaves frame: at speed 0.045, the ball travels ~0.045*15 = 0.68 of the frame across the clip.
+speed_range: [0.012, 0.045]
+radius_range: [0.11, 0.11]   # FIXED radius (per spec)
+seed: 0

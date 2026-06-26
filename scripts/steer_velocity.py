@@ -78,13 +78,20 @@ def main() -> None:
     device = args.device
 
     target = LatentDataset(args.target_latent_dir, layers=cfg.encoder.layers)
-    # available_layers() reflects the metadata's full extracted set, but each sample's tensors are
-    # filtered to cfg.encoder.layers (the layers the decoder was trained on). Derive the steerable set
-    # from the layers ACTUALLY loaded so steer_layers always matches the per-sample latents dict
-    # (otherwise e.g. layer 0 is in `available` but absent from `latents` -> KeyError).
-    available = sorted(int(k) for k in target[0]["layers"].keys())
-    read_layer = max(available) if args.layer < 0 else args.layer
-    steer_layers = sorted(available) if args.all_layers else [read_layer]
+    # Two DISTINCT layer sets — conflating them caused two separate steering bugs:
+    #   * `loaded`  = layers ACTUALLY present in each sample (filtered to cfg.encoder.layers, e.g.
+    #     [6,12,18,23]). The steerable/readable set must come from here, else a layer like 0 is in
+    #     the metadata but absent from the per-sample `latents` dict -> KeyError (fixed in 66acb03).
+    #   * `primed`  = the full metadata layer set (available_layers(), e.g. all 24). Training primed
+    #     the decoder's layer_embedding table with THIS set (train_decoder.py uses
+    #     available_layers()), so the checkpoint has an embedding per metadata layer. The steer-time
+    #     decoder must be primed identically or load_state_dict fails on the extra/missing
+    #     layer_embedding.* keys (the 4th bug). Extra primed embeddings for unused layers are simply
+    #     never read in the forward pass, so priming the full set is safe.
+    loaded = sorted(int(k) for k in target[0]["layers"].keys())
+    primed = [int(x) for x in target.available_layers()]
+    read_layer = max(loaded) if args.layer < 0 else args.layer
+    steer_layers = sorted(loaded) if args.all_layers else [read_layer]
 
     # 1. per-layer UNIT velocity direction learned on the labelled SOURCE cache.
     unit_dirs: dict[int, torch.Tensor] = {}
@@ -112,7 +119,7 @@ def main() -> None:
         cfg.decoder.out_num_frames = cfg.data.num_frames
     decoder = build_decoder(cfg.decoder, enc_dim, state_dim).to(device).eval()
     if hasattr(decoder, "prime_layers"):
-        decoder.prime_layers(available)
+        decoder.prime_layers(primed)  # full metadata set -> matches the trained checkpoint exactly
     load_checkpoint(args.checkpoint, decoder, map_location=device)
 
     # 4. steer, decode, and measure (latent readout + pixel-tracked velocity) per clip.

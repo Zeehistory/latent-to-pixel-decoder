@@ -21,6 +21,16 @@ we want to probe/steer — nothing else:
 Variants (selected by ``scenario``):
 
 * ``constant_velocity`` — the core probe/steer dataset.
+* ``scene_velocity`` — the **difference-vector steering** dataset (supervisor's 2026-06-26 proposal).
+  Clips are grouped into *scenes*; within a scene there are ``clips_per_scene`` clips that share an
+  **identical first frame and motion direction** and differ **only in speed**. This is exactly the
+  controlled pair the supervisor wants for latent arithmetic: encode two same-scene clips
+  ``H_a = E(v_a)``, ``H_b = E(v_b)`` and ``H_b - H_a`` isolates the *speed* factor (everything else —
+  start position, direction, radius, colour, background — is held fixed). Decoding
+  ``H_a + alpha*(H_b - H_a)`` while sweeping ``alpha`` should make the ball visibly speed up / slow down
+  in pixel space, *on-manifold* (alpha=0 -> v_a, alpha=1 -> v_b), instead of pushing an off-manifold
+  probe direction. Scenes are seeded by scene-id so every clip of a scene reproduces the same scene
+  parameters; the per-clip ``rank`` (0=slowest .. K-1=fastest) selects the speed.
 * ``occlusion`` — a static vertical wall in the middle of the frame; the ball passes *behind* it and is
   invisible for the middle frames. Tests whether velocity is still decodable while the ball is hidden
   (object-permanence / physical-state evidence).
@@ -127,6 +137,7 @@ class MovingBall:
         fixed_speed: float = 0.022,
         camera_rotation: bool = False,
         ball_color: tuple[float, float, float] = (0.15, 0.15, 0.15),
+        clips_per_scene: int = 4,
         seed: int = 0,
     ) -> None:
         self.image_size = image_size
@@ -138,11 +149,14 @@ class MovingBall:
         self.fixed_speed = fixed_speed
         self.camera_rotation = camera_rotation
         self.ball_color = ball_color
+        self.clips_per_scene = int(clips_per_scene)
         self.seed = seed
 
     # -- public API -----------------------------------------------------------------------------
     def generate(self, index: int) -> BallClip:
         """Generate clip ``index`` deterministically (same index + seed -> identical clip)."""
+        if self.scenario == "scene_velocity":
+            return self._scene_velocity(index)
         rng = np.random.default_rng(self.seed * 100_003 + index)
         if self.scenario == "occlusion":
             return self._occlusion(rng, index)
@@ -184,6 +198,40 @@ class MovingBall:
         pos0, vel = self._sample_trajectory(rng, radius, speed, angle=None)
         return self._roll_out(pos0, vel, radius, occluder=None, rotation=0.0,
                               scenario="constant_velocity", index=index)
+
+    def _scene_velocity(self, index: int) -> BallClip:
+        """One clip of a *scene*: identical first frame + direction within a scene, only speed varies.
+
+        Determinism is keyed on the **scene id**, not the clip index, so every clip of a scene replays
+        the exact same scene parameters (start position, direction, radius, and the set of speeds). The
+        per-clip ``rank`` (``index % clips_per_scene``) only selects which of the scene's speeds this
+        clip uses — so clip ``rank=0`` is the slowest and ``rank=K-1`` the fastest, and frame 0 is
+        bit-identical across the whole scene. This is the controlled same-scene pair the supervisor's
+        latent-arithmetic steering (``H_b - H_a``) needs.
+        """
+        K = self.clips_per_scene
+        scene = index // K
+        rank = index % K
+        # Scene-level RNG: identical for every clip in the scene -> shared scene geometry.
+        srng = np.random.default_rng(self.seed * 100_003 + 7919 * (scene + 1))
+        radius = float(srng.uniform(*self.radius_range))
+        angle = float(srng.uniform(0, 2 * np.pi))
+        # K distinct speeds spanning the range, sorted slow->fast (rank indexes into this).
+        lo, hi = self.speed_range
+        speeds = np.sort(srng.uniform(lo, hi, size=K))
+        # nudge apart if two speeds collide so every rank is visibly distinct
+        for j in range(1, K):
+            min_gap = 0.4 * (hi - lo) / K
+            if speeds[j] - speeds[j - 1] < min_gap:
+                speeds[j] = min(hi, speeds[j - 1] + min_gap)
+        # Start position is feasible for the FASTEST speed (so all slower ranks also stay in frame),
+        # sampled from srng so it is identical across ranks. Reuse the same fixed direction.
+        pos0, _ = self._sample_trajectory(srng, radius, float(speeds[-1]), angle=angle)
+        speed = float(speeds[rank])
+        vel = speed * np.array([np.cos(angle), np.sin(angle)])
+        return self._roll_out(pos0, vel, radius, occluder=None, rotation=0.0,
+                              scenario="scene_velocity", index=index, scene=scene, rank=rank,
+                              scene_speeds=[float(s) for s in speeds])
 
     def _rotated(self, rng: np.random.Generator, index: int) -> BallClip:
         """Same *speed*, swept *direction* (and optional global camera roll) — equivariance probe."""
@@ -234,6 +282,9 @@ class MovingBall:
         rotation: float,
         scenario: str,
         index: int,
+        scene: int | None = None,
+        rank: int | None = None,
+        scene_speeds: list[float] | None = None,
     ) -> BallClip:
         speed = float(np.linalg.norm(vel))
         angle = float(np.arctan2(vel[1], vel[0]))
@@ -265,6 +316,12 @@ class MovingBall:
             "rotation": rotation, "image_size": self.image_size, "num_frames": self.num_frames,
             "num_objects": 1,
         }
+        if scene is not None:
+            meta["scene"] = int(scene)
+            meta["rank"] = int(rank)
+            meta["clips_per_scene"] = self.clips_per_scene
+            if scene_speeds is not None:
+                meta["scene_speeds"] = scene_speeds
         if occluder is not None:
             meta["occluder"] = list(occluder)
             n_hidden = int(sum(1 for r in states if r[_BALL_KEYS.index("visible")] == 0.0))

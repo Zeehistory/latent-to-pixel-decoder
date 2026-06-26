@@ -80,11 +80,22 @@ class DataConfig:
     radius_range: Any = field(default_factory=lambda: [0.07, 0.10])
     fixed_speed: float = 0.022
     camera_rotation: bool = False
+    clips_per_scene: int = 4  # scene_velocity: clips per scene (shared first frame, only speed varies)
 
 
 @dataclass
 class LossConfig:
     charbonnier: float = 1.0
+    foreground: float = 0.0          # weight on foreground-weighted charbonnier (small-object scenes)
+    foreground_gamma: float = 50.0   # darkness up-weight factor: w = 1 + gamma*(1-target)
+    # Pixel-target compression: map targets into [target_lo, target_hi] before the pixel/structure
+    # losses. Defaults (0,1) are a no-op. For pure-white/black scenes a sigmoid-output decoder can only
+    # match target 1.0 by driving its logit to +inf, where it saturates (grad ~1e-3) and the
+    # (small-object) foreground signal can't pull it back -> uniform collapse. Compressing the white
+    # background to e.g. 0.95 puts the optimum at a finite logit (~2.9, grad ~0.05) so gradients stay
+    # alive and the ball is actually rendered.
+    target_lo: float = 0.0
+    target_hi: float = 1.0
     ssim: float = 0.0
     ms_ssim: float = 0.0
     lpips: float = 0.0
