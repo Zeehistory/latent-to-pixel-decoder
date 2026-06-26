@@ -82,7 +82,9 @@ optim:
 
 train:
   batch_size: 1            # 256px/16fr cross-attn is heavy; keep per-step memory low, use grad_accum
-  num_workers: 4
+  num_workers: 0           # MUST be 0: LatentDataset caches shards PER WORKER, so >0 multiplies the
+                           # ~55GB train cache by num_workers and OOMs CPU RAM (192G) at full scale
+                           # (the pilot survived only because its cache was tiny). See scheduling memory.
   mixed_precision: bf16
   log_every: 50
   ckpt_every: 1000
