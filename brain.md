@@ -350,9 +350,25 @@ show the principle transfers/generalizes rather than overfitting one model.
   vs **~0.001 for a random same-rank subspace** — so U is real but partial (captures the scene-shared
   component; the majority is scene-local placement). This QUANTIFIES why the global "speed-up vector"
   failed and motivates canonicalization. Best layer L12. Artifacts +
-  `outputs/analysis/moving_ball_v2d/subspace/subspace_summary.json`. PIXEL proof (does U/ridge/canon-ridge
-  actually steer the decoded ball toward v_b on held-out scenes; does the inverse-roll placement lift the
-  ~37%?) RUNNING. Scheduling lesson (user directive): always pick the least-queued partition — gpu_devel
+  `outputs/analysis/moving_ball_v2d/subspace/subspace_summary.json`.
+  **PIXEL proof DONE (40 held-out test scenes, decoder final loss 0.055; headline metric = decoded-vs-TARGET
+  velocity-vector angle error; the random same-rank subspace is the "no-op stay-at-v_a" floor ≈44° because
+  rank0→rank7 differ ~45° in heading):**
+    - **full_delta (per-pair Δ): angle err 1.66°, speed_ratio 0.997, ρvx/ρvy 0.999** — faithful 2D velocity
+      steering WORKS per-pair; the speed-only win extends cleanly to direction+magnitude.
+    - **subspace_U (Phase 3): U beats random at every rank, saturates ~k=8** — U2 27°, U4 23°, U8 21°
+      (U16=U8, only 8 comps saved) vs **random 44°**. A low-rank (~8D) GLOBAL velocity subspace is REAL and
+      preserves steering while a random same-rank subspace does not (doesn't reach 1.7° because within-scene
+      ΔH is ~5.5D; U captures the scene-shared part).
+    - **ridge_global (Phase 4, steer straight from Δv): 34.4°** (vs 44° no-op) — a learned linear F_U
+      transfers to held-out scenes but only PARTIALLY (matches latent cos 0.39), as predicted.
+    - **canon_ridge (Phase 5): 34.8° — NO lift over raw ridge.** Honest negative: GT-informed START-roll
+      canonicalization doesn't help, because within a scene the start is ALREADY shared and the ΔH spread is
+      DIRECTION-induced (different headings → different path tokens), which a start-roll can't align. → next
+      lever is DIRECTION-aware canonicalization (rotation) / learned register, not start-roll.
+  Artifacts: `outputs/analysis/moving_ball_v2d/steer_last/{steer2d_summary.json,scene*_methods.png}`; decoder
+  `.../runs/moving_ball_scene_v2d_decoder_fp/checkpoints/last.pt`.
+  Scheduling lesson (user directive): always pick the least-queued partition — gpu_devel
   (decoder, instant, 6h QOS) + bigmem (subspace, needs ≥256G mem) started in ~30s vs scavenge_gpu (370
   deep) / day (ETA hours). See memory [[cluster-partition-playbook]], [[velocity-subspace-operator-plan]].
 
