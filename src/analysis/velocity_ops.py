@@ -107,6 +107,18 @@ def canon_shift(pos: np.ndarray, grid: tuple[int, int, int]) -> tuple[int, int]:
     return (H // 2 - h, W // 2 - w)
 
 
+def direction_bin(v: np.ndarray, n_bins: int) -> int:
+    """Bin a 2D velocity's heading atan2(vy, vx) into ``n_bins`` equal wedges over [0, 2*pi).
+
+    The velocity edit's spatial footprint depends on the ball's heading (different directions traverse
+    different tokens), so a single global operator cannot place it correctly. Conditioning the operator
+    on the heading bin is the equivariance-free way to make F_U direction-aware: within a wedge the path
+    orientation is roughly fixed, so a position-canonicalized ridge per bin can place the edit.
+    """
+    ang = np.arctan2(float(v[1]), float(v[0])) % (2 * np.pi)
+    return int(min(n_bins - 1, int(ang / (2 * np.pi) * n_bins)))
+
+
 # ----------------------------------------------------------------------------------------------------
 # PCA of Delta H (per layer)
 # ----------------------------------------------------------------------------------------------------
@@ -142,6 +154,24 @@ def participation_ratio(eigvals: np.ndarray) -> float:
     """Effective dimensionality = (sum lambda)^2 / sum(lambda^2). ~2 means a 2D subspace dominates."""
     pos = np.clip(eigvals, 0, None)
     return float((pos.sum() ** 2) / ((pos ** 2).sum() + 1e-30))
+
+
+def principal_angles_bases(A: np.ndarray, B: np.ndarray) -> dict[str, float]:
+    """Principal angles (degrees) between two orthonormal subspaces ``A`` (k,D) and ``B`` (m,D).
+
+    Singular values of ``A @ B.T`` are the cosines of the principal angles. Small angles -> the subspaces
+    overlap (share directions); angles near 90 deg -> orthogonal / disentangled. Returns the mean and the
+    smallest principal angle (the most-aligned direction pair).
+    """
+    s = np.linalg.svd(A @ B.T, compute_uv=False)
+    ang = np.degrees(np.arccos(np.clip(s, -1.0, 1.0)))
+    return {"mean_deg": float(ang.mean()), "min_deg": float(ang.min())}
+
+
+def orthonormalize(basis: np.ndarray) -> np.ndarray:
+    """Re-orthonormalize rows of ``basis`` (k,D) via QR (defensive; PCA bases are already ~orthonormal)."""
+    Q, _ = np.linalg.qr(basis.T)
+    return Q.T.copy()
 
 
 def project(delta: np.ndarray, basis: np.ndarray) -> np.ndarray:

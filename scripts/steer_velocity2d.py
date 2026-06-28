@@ -95,6 +95,9 @@ def main() -> None:
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--output_dir", required=True)
     p.add_argument("--ks", default="2,4,8", help="subspace ranks to test")
+    p.add_argument("--dir_bins", default="4,8,16",
+                   help="direction-conditioned canonicalized operator: n_bins values to test (needs "
+                        "fit_dir_operator.py artifacts; empty string to skip)")
     p.add_argument("--num_scenes", type=int, default=30)
     p.add_argument("--device", default="cuda")
     p.add_argument("overrides", nargs="*")
@@ -119,6 +122,17 @@ def main() -> None:
     rng = np.random.default_rng(0)
     Rbasis = {L: {k: vo.random_basis(Bt[L].shape[1], k, rng) for k in ks} for L in layers}
 
+    # direction-conditioned canonicalized operator (fit_dir_operator.py artifacts), if present
+    dir_bins = [int(x) for x in args.dir_bins.split(",") if x.strip()]
+    Bt_dir = {}  # {N: {b: {L: (2,D)}}}
+    for N in list(dir_bins):
+        try:
+            Bt_dir[N] = {b: {L: np.load(art / f"ridge_dirbin{N}_b{b}_Bt_L{L}.npy").astype(np.float64)
+                             for L in layers} for b in range(N)}
+        except FileNotFoundError:
+            print(f"[steer2d] no dir-operator artifacts for n_bins={N}; skipping")
+            dir_bins.remove(N)
+
     # decoder
     rec0 = ds.records[0]
     enc_dim, state_dim = int(rec0["hidden_dim"]), int(rec0["state_dim"])
@@ -131,6 +145,7 @@ def main() -> None:
     load_checkpoint(args.checkpoint, decoder, map_location=device)
 
     methods = ["full_delta", "ridge_global", "canon_ridge"] + \
+              [f"dircanon{N}" for N in dir_bins] + \
               [f"subspace_U{k}" for k in ks] + [f"random{k}" for k in ks]
     decoded = {m: [] for m in methods}
     targets = []
@@ -153,6 +168,10 @@ def main() -> None:
             "ridge_global": {L: dv @ Bt[L] for L in layers},
             "canon_ridge": {L: vo.roll_layer(dv @ Bt_canon[L], grid, (-sh[0], -sh[1])) for L in layers},
         }
+        for N in dir_bins:
+            bidx = vo.direction_bin(vb, N)   # condition on TARGET heading
+            edits[f"dircanon{N}"] = {
+                L: vo.roll_layer(dv @ Bt_dir[N][bidx][L], grid, (-sh[0], -sh[1])) for L in layers}
         for k in ks:
             edits[f"subspace_U{k}"] = {L: vo.project(dH[L], Ubasis[L][:k]) for L in layers}
             edits[f"random{k}"] = {L: vo.project(dH[L], Rbasis[L][k]) for L in layers}

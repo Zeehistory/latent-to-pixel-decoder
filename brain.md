@@ -333,6 +333,22 @@ show the principle transfers/generalizes rather than overfitting one model.
 
 ## Changelog
 
+- **2026-06-28 (pm)** — Step 2 DIRECTION-AWARE OPERATOR (the open lever) → clean NEGATIVE. canon_ridge
+  (start-roll) gave no lift because within a scene the start is already shared and the ΔH spread is
+  DIRECTION-induced. Best equivariance-free fix tried: a DIRECTION-CONDITIONED canonicalized ridge — bin
+  the target heading, fit a position-canonicalized ridge per bin (`src/analysis/velocity_ops.py::direction_bin`,
+  `scripts/fit_dir_operator.py`, decode in `scripts/steer_velocity2d.py` as `dircanon{N}`). Result: it made
+  generalization WORSE, monotonically with bins — canon_ridge 34.8° → dircanon4 40.3° → dircanon8 41.9° →
+  dircanon16 42.7° (→ 44° no-op floor), with healthy bin counts (~880/bin at N=4, so not data starvation).
+  Mechanism: pooling all directions is what lets a linear operator estimate the SHARED, direction-independent
+  component of the edit (~37%); splitting by heading discards that without recovering the direction-SPECIFIC
+  part (which is about token/path POSITION, not linearly recoverable from a velocity command). Conclusion:
+  the velocity edit cannot be synthesized from the command alone by a (binned) linear operator; the per-pair
+  counterfactual — optionally denoised via the global 8D subspace (21°) — remains necessary. Next lever is a
+  TRAJECTORY/position-conditioned operator (give it the scene geometry), or a direction-conditioned SUBSPACE
+  (still needs H_b). Artifacts: `outputs/analysis/moving_ball_v2d/steer_last/steer2d_summary.json`,
+  `.../subspace/ridge_dirbin*.npy`. See [[velocity-subspace-operator-plan]].
+
 - **2026-06-28** — Step 2 VELOCITY SUBSPACE / OPERATOR (PI direction 2026-06-27): moved from speed-only
   to TRUE 2D velocity (direction+speed) and from a per-instance edit toward a transferable representation.
   Built `scene_velocity2d` (8 clips/scene share ONE start position, each a distinct velocity VECTOR;
