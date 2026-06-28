@@ -333,6 +333,29 @@ show the principle transfers/generalizes rather than overfitting one model.
 
 ## Changelog
 
+- **2026-06-28** — Step 2 VELOCITY SUBSPACE / OPERATOR (PI direction 2026-06-27): moved from speed-only
+  to TRUE 2D velocity (direction+speed) and from a per-instance edit toward a transferable representation.
+  Built `scene_velocity2d` (8 clips/scene share ONE start position, each a distinct velocity VECTOR;
+  `configs/data/moving_ball_scene_velocity2d.yaml`, `tests/test_scene_velocity2d.py` 8 green). Encoded
+  train 4000 / test 800 (`moving_ball_scene_v2d`); retrained the frame_position decoder
+  (`moving_ball_scene_v2d_decoder_fp`, 8000 steps — direction-agnostic loss transfers). New analysis:
+  `src/analysis/velocity_ops.py` (Gram-trick PCA, streaming-normal-equations ridge F_U at full
+  D=8·256·1024, token-roll canonicalization A_s), `scripts/velocity_subspace.py` (Phase 2 + fits
+  ridge/canon/U artifacts), `scripts/steer_velocity2d.py` (Phases 3-5 decode+track velocity VECTOR).
+  **Phase-2 LATENT result (held-out test):** velocity ΔH is NOT a clean 2D subspace — *within* a scene
+  (shared start) effective rank ≈5.5 (top-2 only ~46%) because varying DIRECTION moves the ball through
+  different tokens; *across* scenes the per-scene velocity 2D-subspaces are near-orthogonal (mean
+  principal angle ~71°) and global effective rank explodes to 36-58. A single global linear operator /
+  top-2 PCA subspace recovers only ~37% of held-out ΔH direction (ridge cos≈0.39 @ L12, U2 retain≈0.39)
+  vs **~0.001 for a random same-rank subspace** — so U is real but partial (captures the scene-shared
+  component; the majority is scene-local placement). This QUANTIFIES why the global "speed-up vector"
+  failed and motivates canonicalization. Best layer L12. Artifacts +
+  `outputs/analysis/moving_ball_v2d/subspace/subspace_summary.json`. PIXEL proof (does U/ridge/canon-ridge
+  actually steer the decoded ball toward v_b on held-out scenes; does the inverse-roll placement lift the
+  ~37%?) RUNNING. Scheduling lesson (user directive): always pick the least-queued partition — gpu_devel
+  (decoder, instant, 6h QOS) + bigmem (subspace, needs ≥256G mem) started in ~30s vs scavenge_gpu (370
+  deep) / day (ETA hours). See memory [[cluster-partition-playbook]], [[velocity-subspace-operator-plan]].
+
 - **2026-06-26 (eve)** — Step 2 MAGNITUDE GAP CLOSED → faithful pixel-level velocity steering. The
   remaining gap (decoded ball ~4× too slow, decoded-vs-GT r=0.34) was the decoder's OBJECTIVE, not its
   capacity or the steering vector: the pixel loss was minimized by a static path-covering smear (centroid

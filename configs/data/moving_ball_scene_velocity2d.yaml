@@ -1,0 +1,33 @@
+# 2D-velocity scene dataset (true velocity: direction AND speed both vary).
+#
+# Same same-scene-pair contract as moving_ball_scene.yaml, but each scene holds ONE initial position
+# and ramps the full 2D velocity VECTOR across ranks: each of the `clips_per_scene` clips has a distinct
+# direction AND a distinct speed. Encoding two same-scene clips gives H_a, H_b whose difference
+# H_b - H_a isolates a 2D velocity difference  Delta v = v_b - v_a. This is the dataset for the
+# velocity-SUBSPACE and learned-operator experiments (find U s.t. H_a + P_U(H_b-H_a) decodes toward
+# v_b; fit F_U: Delta v -> Delta H; canonicalize start position and regress in canonical coords).
+#
+# Spec (matches moving_ball_scene.yaml): 16 frames, FPS=4, 256x256 -> VJEPA2-L latent grid
+# (T'=8, 16x16=256 spatial), H in R^{8x256x1024}. White bg, ONE ball, FIXED radius + colour.
+#
+# Speed is capped below the speed-only dataset: with a single shared start serving 8 directions, the
+# ball must stay in frame for every heading, so max displacement <= (0.5 - radius). At FPS=4 over 16
+# frames that bounds per-frame speed ~ (0.5-0.11)/15 ~= 0.026. The generator additionally shrinks all
+# speeds in unison (preserving directions) if a particular scene's direction spread is infeasible.
+#
+# Splits are scene-disjoint via distinct seeds (train=0 / test=2) and set per-split at submit:
+#   train: num_clips=4000 seed=0   (500 scenes x 8)
+#   test:  num_clips=800  seed=2   (100 scenes x 8)
+name: moving_ball
+root: null
+image_size: 256
+num_frames: 16
+fps: 4
+scenario: scene_velocity2d
+clips_per_scene: 8
+categories: all
+split: train
+num_clips: 4000
+speed_range: [0.012, 0.026]
+radius_range: [0.11, 0.11]   # FIXED radius (per spec)
+seed: 0

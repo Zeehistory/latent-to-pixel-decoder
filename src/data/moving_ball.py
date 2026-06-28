@@ -31,6 +31,12 @@ Variants (selected by ``scenario``):
   in pixel space, *on-manifold* (alpha=0 -> v_a, alpha=1 -> v_b), instead of pushing an off-manifold
   probe direction. Scenes are seeded by scene-id so every clip of a scene reproduces the same scene
   parameters; the per-clip ``rank`` (0=slowest .. K-1=fastest) selects the speed.
+* ``scene_size`` / ``scene_color`` / ``scene_background`` — **nuisance-control** scene datasets, built
+  to the same same-scene-pair contract as ``scene_velocity`` but holding velocity + trajectory FIXED
+  across the scene and ramping exactly ONE appearance factor across ranks (ball radius / ball colour /
+  flat background shade). ``H_b - H_a`` then isolates that single factor. These are the controls for the
+  disentanglement experiment: the "true" velocity axis should lie in the complement of the
+  size/colour/background subspaces, so steering velocity leaves size/colour/background untouched.
 * ``occlusion`` — a static vertical wall in the middle of the frame; the ball passes *behind* it and is
   invisible for the middle frames. Tests whether velocity is still decodable while the ball is hidden
   (object-permanence / physical-state evidence).
@@ -81,9 +87,12 @@ def _render(
     visible: bool,
     occluder: tuple[float, float, float, float] | None,
     rotation: float,
+    bg_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> np.ndarray:
-    """Anti-aliased disk on a clean **white** background -> (H, W, 3) float in [0, 1].
+    """Anti-aliased disk on a flat background -> (H, W, 3) float in [0, 1].
 
+    Background is clean white by default; the ``scene_background`` variant passes a lighter/darker flat
+    ``bg_color`` to make the background the controlled nuisance factor (ball + trajectory held fixed).
     ``rotation`` (radians) rotates the rendered image about its center — used only by the equivariance
     ``rotated`` scenario to mimic a camera roll. ``pos`` is in normalized [0, 1] image coords.
     """
@@ -100,7 +109,9 @@ def _render(
         xn = cx + ca * dx - sa * dy
         yn = cy + sa * dx + ca * dy
 
-    img = np.ones((h, w, 3), dtype=np.float32)  # clean white background
+    img = np.empty((h, w, 3), dtype=np.float32)  # flat background (white by default)
+    for c in range(3):
+        img[..., c] = bg_color[c]
 
     if visible:
         d = np.sqrt((xn - pos[0]) ** 2 + (yn - pos[1]) ** 2)
@@ -157,6 +168,14 @@ class MovingBall:
         """Generate clip ``index`` deterministically (same index + seed -> identical clip)."""
         if self.scenario == "scene_velocity":
             return self._scene_velocity(index)
+        if self.scenario == "scene_velocity2d":
+            return self._scene_velocity2d(index)
+        if self.scenario == "scene_size":
+            return self._scene_nuisance(index, "scene_size")
+        if self.scenario == "scene_color":
+            return self._scene_nuisance(index, "scene_color")
+        if self.scenario == "scene_background":
+            return self._scene_nuisance(index, "scene_background")
         rng = np.random.default_rng(self.seed * 100_003 + index)
         if self.scenario == "occlusion":
             return self._occlusion(rng, index)
@@ -233,6 +252,131 @@ class MovingBall:
                               scenario="scene_velocity", index=index, scene=scene, rank=rank,
                               scene_speeds=[float(s) for s in speeds])
 
+    def _shared_start_and_scale(
+        self, rng: np.random.Generator, radius: float, vels: np.ndarray,
+    ) -> tuple[np.ndarray, float]:
+        """Find ONE start position that keeps every velocity's straight-line path in frame.
+
+        Given the scene's ``K`` velocity vectors ``vels`` (K, 2), the feasible start box that keeps
+        *all* K disks within ``[radius, 1-radius]`` for all T frames is the intersection of the
+        per-velocity boxes — per axis ``[lo + max(0, -min_k t_k),  hi - max(0, max_k t_k)]`` where
+        ``t_k`` is path k's total displacement. If the spread of directions makes that intersection
+        empty, all speeds are shrunk by a common factor (so the velocity *directions* and their
+        relative magnitudes are preserved) until a shared start exists. Returns ``(pos0, scale)``;
+        callers must apply ``scale`` to the velocities they store/roll out.
+        """
+        lo, hi = radius, 1.0 - radius
+        scale = 1.0
+        for _ in range(24):
+            totals = vels * scale * (self.num_frames - 1)  # (K, 2)
+            box_lo = lo + np.maximum(0.0, -totals.min(axis=0))
+            box_hi = hi - np.maximum(0.0, totals.max(axis=0))
+            if np.all(box_hi > box_lo):
+                pos0 = box_lo + rng.uniform(0, 1, size=2) * (box_hi - box_lo)
+                return pos0, scale
+            scale *= 0.85
+        return np.array([0.5, 0.5]), scale  # degenerate: centre + the smallest scale tried
+
+    def _scene_velocity2d(self, index: int) -> BallClip:
+        """One clip of a *2D-velocity* scene: all ranks share ONE initial position, and each rank has a
+        distinct velocity VECTOR — both **direction and speed** vary across ranks (true velocity, not
+        just speed). This is the dataset for the velocity-subspace / operator experiments: encoding two
+        same-scene clips gives ``H_a, H_b`` whose difference ``H_b - H_a`` isolates a 2D velocity
+        difference ``Delta v = v_b - v_a``. Determinism is keyed on the scene id; ``rank`` selects which
+        of the scene's K velocity vectors this clip uses.
+        """
+        K = self.clips_per_scene
+        scene = index // K
+        rank = index % K
+        srng = np.random.default_rng(self.seed * 100_003 + 7919 * (scene + 1))
+        radius = float(srng.uniform(*self.radius_range))
+        lo, hi = self.speed_range
+        # K directions spread roughly uniformly over the circle (random base + jitter) ...
+        base = float(srng.uniform(0, 2 * np.pi))
+        angles = np.array([(base + 2 * np.pi * j / K + float(srng.uniform(-0.20, 0.20))) % (2 * np.pi)
+                           for j in range(K)])
+        # ... and K distinct speeds spanning the range, nudged apart so every rank is visibly distinct.
+        speeds = np.sort(srng.uniform(lo, hi, size=K))
+        for j in range(1, K):
+            min_gap = 0.4 * (hi - lo) / K
+            if speeds[j] - speeds[j - 1] < min_gap:
+                speeds[j] = min(hi, speeds[j - 1] + min_gap)
+        # decorrelate speed from direction ordering so rank doesn't trivially encode a speed ramp
+        speeds = speeds[srng.permutation(K)]
+        vels = np.stack([speeds * np.cos(angles), speeds * np.sin(angles)], axis=1)  # (K, 2)
+        # one start position feasible for ALL K paths (shrinks speeds in unison only if forced)
+        pos0, scale = self._shared_start_and_scale(srng, radius, vels)
+        vels = vels * scale
+        vel = vels[rank]
+        return self._roll_out(pos0, vel, radius, occluder=None, rotation=0.0,
+                              scenario="scene_velocity2d", index=index, scene=scene, rank=rank,
+                              scene_velocities=[[float(v[0]), float(v[1])] for v in vels])
+
+    # nuisance-factor ramp endpoints (held dark/light enough that the darkness>0.5 tracker still
+    # finds the ball: every ball stays clearly darker than every background).
+    _COLOR_LO = (0.10, 0.10, 0.45)   # dark blue  (rank 0)
+    _COLOR_HI = (0.45, 0.10, 0.10)   # dark red   (rank K-1)
+    _BG_LO = 1.00                    # white      (rank 0)
+    _BG_HI = 0.70                    # light grey (rank K-1)
+
+    def _scene_nuisance(self, index: int, scenario: str) -> BallClip:
+        """One clip of a *nuisance-control* scene: velocity + trajectory held fixed across the scene,
+        and exactly ONE appearance factor (radius / ball colour / background shade) ramps across ranks.
+
+        Built to the same contract as :meth:`_scene_velocity` so the difference vector ``H_b - H_a``
+        (rank 0 vs rank K-1) isolates that single factor: the steering datasets for the disentanglement
+        experiment (does the velocity subspace lie in the complement of the size/colour/background
+        subspaces?). Determinism is keyed on the scene id; ``rank`` selects the factor value.
+        """
+        K = self.clips_per_scene
+        scene = index // K
+        rank = index % K
+        srng = np.random.default_rng(self.seed * 100_003 + 7919 * (scene + 1))
+        # Shared scene geometry/motion (identical for every rank): one speed, one direction.
+        angle = float(srng.uniform(0, 2 * np.pi))
+        speed = float(srng.uniform(*self.speed_range))
+
+        # Defaults (shared across ranks); the active scenario overrides its own ramped factor below.
+        radius = float(srng.uniform(*self.radius_range))
+        color = tuple(self.ball_color)
+        bg_color = (1.0, 1.0, 1.0)
+        factor_values: list[float] = []
+
+        if scenario == "scene_size":
+            # K distinct radii spanning radius_range, sorted small->large (rank indexes into this).
+            lo, hi = self.radius_range
+            radii = np.sort(srng.uniform(lo, hi, size=K))
+            for j in range(1, K):
+                min_gap = 0.4 * (hi - lo) / K
+                if radii[j] - radii[j - 1] < min_gap:
+                    radii[j] = min(hi, radii[j - 1] + min_gap)
+            radius = float(radii[rank])
+            factor_values = [float(r) for r in radii]
+            max_radius = float(radii[-1])  # pos0 feasible for the LARGEST disk -> all ranks stay in frame
+        else:
+            max_radius = radius
+
+        if scenario == "scene_color":
+            ts = np.linspace(0.0, 1.0, K)
+            colors = [tuple(float((1 - t) * a + t * b) for a, b in zip(self._COLOR_LO, self._COLOR_HI))
+                      for t in ts]
+            color = colors[rank]
+            factor_values = [float(t) for t in ts]  # ramp fraction (0=blue .. 1=red)
+
+        if scenario == "scene_background":
+            ts = np.linspace(0.0, 1.0, K)
+            greys = [float((1 - t) * self._BG_LO + t * self._BG_HI) for t in ts]
+            g = greys[rank]
+            bg_color = (g, g, g)
+            factor_values = [float(v) for v in greys]
+
+        # Start position feasible for the (max) radius at the shared speed — identical across ranks.
+        pos0, _ = self._sample_trajectory(srng, max_radius, speed, angle=angle)
+        vel = speed * np.array([np.cos(angle), np.sin(angle)])
+        return self._roll_out(pos0, vel, radius, occluder=None, rotation=0.0,
+                              scenario=scenario, index=index, scene=scene, rank=rank,
+                              color=color, bg_color=bg_color, factor_values=factor_values)
+
     def _rotated(self, rng: np.random.Generator, index: int) -> BallClip:
         """Same *speed*, swept *direction* (and optional global camera roll) — equivariance probe."""
         radius = float(rng.uniform(*self.radius_range))
@@ -285,7 +429,12 @@ class MovingBall:
         scene: int | None = None,
         rank: int | None = None,
         scene_speeds: list[float] | None = None,
+        scene_velocities: list[list[float]] | None = None,
+        color: tuple[float, float, float] | None = None,
+        bg_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+        factor_values: list[float] | None = None,
     ) -> BallClip:
+        color = tuple(self.ball_color) if color is None else tuple(color)
         speed = float(np.linalg.norm(vel))
         angle = float(np.arctan2(vel[1], vel[0]))
         frames: list[np.ndarray] = []
@@ -298,8 +447,8 @@ class MovingBall:
                 x0, y0, x1, y1 = occluder
                 # hidden while the ball center lies within the wall band
                 visible = not (x0 <= pos[0] <= x1)
-            frames.append(_render(pos, radius, self.image_size, self.ball_color, visible,
-                                  occluder, rotation))
+            frames.append(_render(pos, radius, self.image_size, color, visible,
+                                  occluder, rotation, bg_color=bg_color))
             row = [
                 float(pos[0]), float(pos[1]), float(vel[0]), float(vel[1]),
                 0.0, 0.0,  # acceleration is exactly zero (constant velocity)
@@ -316,12 +465,18 @@ class MovingBall:
             "rotation": rotation, "image_size": self.image_size, "num_frames": self.num_frames,
             "num_objects": 1,
         }
+        meta["ball_color"] = list(color)
+        meta["bg_color"] = list(bg_color)
         if scene is not None:
             meta["scene"] = int(scene)
             meta["rank"] = int(rank)
             meta["clips_per_scene"] = self.clips_per_scene
             if scene_speeds is not None:
                 meta["scene_speeds"] = scene_speeds
+            if scene_velocities is not None:
+                meta["scene_velocities"] = scene_velocities
+            if factor_values is not None:
+                meta["factor_values"] = factor_values
         if occluder is not None:
             meta["occluder"] = list(occluder)
             n_hidden = int(sum(1 for r in states if r[_BALL_KEYS.index("visible")] == 0.0))
