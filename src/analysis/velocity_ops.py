@@ -226,3 +226,147 @@ def cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 def rel_error(pred: np.ndarray, true: np.ndarray) -> float:
     return float(np.linalg.norm(pred - true) / (np.linalg.norm(true) + 1e-30))
+
+
+# ----------------------------------------------------------------------------------------------------
+# masked TRAJECTORY-TRANSPORT operator  (PI direction 2026-06-29)
+#
+# The command-only ridge F_U: Delta v -> Delta H plateaus at ~34 deg (latent cos 0.39) because Delta v
+# says WHAT velocity to write but not WHERE in the token grid to write it; the missing ~63% is the
+# scene-local PLACEMENT (which tokens the ball's path occupies). We hand the operator that geometry as
+# soft trajectory masks built from ground-truth ball centers and let it learn only velocity->channel:
+#
+#   Delta H_hat[t,i,j,:] = M_b*(c+_t + v_b @ B+_t)     # target mask: write a ball here (+ motion-specific)
+#                        + M_a*(c-_t + v_a @ B-_t)     # source mask: remove the old ball (+ motion-specific)
+#                        + M_U*((v_b-v_a) @ Bd_t)      # union mask: correction in the changed tube
+#
+# Each mask carries a velocity-INDEPENDENT BIAS (c+_t writes "a ball is here", c-_t removes it): the
+# dominant part of Delta H near the ball is its PRESENCE -- a dark disk, the same at any speed; velocity
+# only sets WHERE, which the mask already encodes. A bias-free mask*(v @ B) form cannot emit that constant
+# (it must express "ball present" as a linear function of v, which partly cancels across +/- velocities
+# and collapses; empirically gave cos~0.13 / shared cos~-0.95). The v-terms are then the secondary
+# motion-specific modulation. LINEAR in the params, so per temporal token t it is a ridge of the 8-dim
+# per-token feature phi=[M_b, M_b*v_b, M_a, M_a*v_a, M_U*dv] -> Delta H token (D,); B_t is (8, D). See
+# ``LinearLS`` + ``transport_features``.
+# ----------------------------------------------------------------------------------------------------
+def clip_positions(sample: dict) -> np.ndarray:
+    """Per-frame ball centers ``(T_frames, 2)`` (normalized [0,1] x,y) from the packed state columns."""
+    keys = list(sample["state_keys"])
+    state = np.asarray(sample["state"])
+    xi, yi = keys.index("obj0_pos_x"), keys.index("obj0_pos_y")
+    return np.stack([state[:, xi], state[:, yi]], axis=1).astype(np.float64)
+
+
+def temporal_token_centers(positions: np.ndarray, n_t: int) -> np.ndarray:
+    """Collapse ``(T_frames, 2)`` per-frame centers to ``(n_t, 2)`` per-temporal-token centers.
+
+    V-JEPA's tubelet size is 2, so temporal token ``t`` aggregates frames ``2t`` and ``2t+1``; its center
+    is the mean of those two frame centers. Requires ``T_frames == 2 * n_t`` (16 frames -> 8 tokens).
+    """
+    T = positions.shape[0]
+    if T != 2 * n_t:
+        raise ValueError(f"expected T_frames={2 * n_t} for n_t={n_t}, got {T}")
+    return positions.reshape(n_t, 2, 2).mean(axis=1)
+
+
+def forward_sim_positions(start: np.ndarray, vel: np.ndarray, n_frames: int) -> np.ndarray:
+    """Linear constant-velocity roll-out ``pos[f] = start + vel*f`` (``(n_frames, 2)``), clamped to [0,1].
+
+    Exact for the v2d dataset (constant velocity, no bounces, ball stays in frame), so the TARGET
+    trajectory mask is reconstructable at test time from the command alone — no H_b. The clamp guards
+    against tiny numerical drift past the frame edge; feasible scenes never actually leave [0,1].
+    """
+    f = np.arange(n_frames, dtype=np.float64).reshape(-1, 1)
+    return np.clip(start.reshape(1, 2) + f * vel.reshape(1, 2), 0.0, 1.0)
+
+
+def gaussian_mask(centers: np.ndarray, grid: tuple[int, int, int], sigma: float) -> np.ndarray:
+    """Peak-normalized Gaussian soft masks ``(T, H, W)`` around per-temporal-token centers.
+
+    ``centers`` is ``(T, 2)`` normalized (x,y). Uses the same image->cell convention as ``pos_to_cell``
+    (x -> continuous column ``w_c = x*(W-1)``, y -> continuous row ``h_c = y*(H-1)``), so the masks align
+    with ``roll_layer``'s ``(T,H,W,D)`` token layout and the decoder's grid orientation. Max value 1 at
+    the center cell; ``sigma`` is in cell units.
+    """
+    T, H, W = grid
+    if centers.shape[0] != T:
+        raise ValueError(f"expected {T} centers, got {centers.shape[0]}")
+    hh = np.arange(H).reshape(1, H, 1)
+    ww = np.arange(W).reshape(1, 1, W)
+    w_c = (centers[:, 0] * (W - 1)).reshape(T, 1, 1)
+    h_c = (centers[:, 1] * (H - 1)).reshape(T, 1, 1)
+    d2 = (hh - h_c) ** 2 + (ww - w_c) ** 2
+    return np.exp(-d2 / (2.0 * sigma * sigma)).astype(np.float64)
+
+
+COMMAND_FEATURE_DIM = 13
+
+
+def command_features(va: np.ndarray, vb: np.ndarray) -> np.ndarray:
+    """Rich command feature vector ``(13,)`` for synthesizing the velocity edit WITHOUT H_b.
+
+    The pixel proof showed velocity lives in a global low-rank subspace, not the ball tokens, so the edit
+    should be synthesized from the COMMAND (v_a, v_b) — richer than the bare Delta v the plain ridge uses.
+    Columns: ``[1, v_b(2), v_a(2), dv(2), |v_b|, |v_a|, u_b(2), u_a(2)]`` where ``u`` are unit headings.
+    The bias + magnitudes + unit directions let a linear map capture direction/speed-dependent structure
+    that ``dv`` alone cannot (e.g. the edit's magnitude scaling with speed, sign with heading).
+    """
+    va = np.asarray(va, dtype=np.float64).reshape(2)
+    vb = np.asarray(vb, dtype=np.float64).reshape(2)
+    dv = vb - va
+    sa = float(np.linalg.norm(va)); sb = float(np.linalg.norm(vb))
+    ua = va / (sa + 1e-9); ub = vb / (sb + 1e-9)
+    return np.array([1.0, vb[0], vb[1], va[0], va[1], dv[0], dv[1], sb, sa,
+                     ub[0], ub[1], ua[0], ua[1]], dtype=np.float64)
+
+
+TRANSPORT_FEATURE_DIM = 8
+
+
+def transport_features(M_a: np.ndarray, M_b: np.ndarray, va: np.ndarray, vb: np.ndarray,
+                       grid: tuple[int, int, int]) -> np.ndarray:
+    """Assemble the per-token transport feature matrix ``phi`` of shape ``(T*H*W, 8)``.
+
+    Row order is ``roll_layer``'s flatten ``index = t*(H*W) + h*W + w`` so that ``phi @ B_t`` reshapes
+    straight back to a flat per-layer edit consumable by ``steer_velocity2d._apply_edit``. The 8 columns
+    are ``[M_b, M_b*v_bx, M_b*v_by, M_a, M_a*v_ax, M_a*v_ay, M_U*dvx, M_U*dvy]`` (``M_U = max(M_a, M_b)``):
+    the bare ``M_b``/``M_a`` columns are the velocity-INDEPENDENT presence write/remove biases, the
+    ``M_*v_*`` columns the motion-specific modulation, and ``M_U*dv`` the changed-tube correction.
+    """
+    Mu = np.maximum(M_a, M_b)
+    mb = M_b.reshape(-1, 1); ma = M_a.reshape(-1, 1); mu = Mu.reshape(-1, 1)
+    dv = (vb - va).reshape(1, 2)
+    return np.concatenate([mb, mb * vb.reshape(1, 2), ma, ma * va.reshape(1, 2), mu * dv],
+                          axis=1).astype(np.float64)  # (T*H*W, 8)
+
+
+class LinearLS:
+    """Streaming ridge least-squares ``Y ~= X B`` for arbitrary input dim ``p`` (generalizes RidgeOperator).
+
+    Accumulates ``X^T X`` (``p x p``) and ``X^T Y`` (``p x out``) over batches of rows, then solves
+    ``B = (X^T X + lambda I)^{-1} X^T Y`` (a single ``p x p`` inverse). The transport operator uses
+    ``p = 8`` (two presence biases + four mask*velocity + two union*dv) and ``out = 1024`` per
+    (layer, temporal token).
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, ridge: float = 1.0):
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.ridge = ridge
+        self.XtX = np.zeros((in_dim, in_dim))
+        self.XtY = np.zeros((in_dim, out_dim))
+        self.n = 0
+
+    def add(self, X: np.ndarray, Y: np.ndarray) -> None:
+        """Accumulate a batch: ``X`` is ``(n, in_dim)``, ``Y`` is ``(n, out_dim)``."""
+        self.XtX += X.T @ X
+        self.XtY += X.T @ Y
+        self.n += X.shape[0]
+
+    def solve(self) -> np.ndarray:
+        A = self.XtX + self.ridge * np.eye(self.in_dim)
+        self.B = np.linalg.solve(A, self.XtY)  # (in_dim, out_dim)
+        return self.B
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return X @ self.B

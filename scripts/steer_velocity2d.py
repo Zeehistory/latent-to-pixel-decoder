@@ -57,6 +57,25 @@ def _apply_edit(Ha, edit_flat, grid, device):
     return out
 
 
+def _transport_edit(B_per_t, M_a, M_b, va, vb, grid, layers):
+    """Command-only masked-transport edit: per layer, phi(M_a,M_b,va,vb) @ B_t -> flat dH_hat.
+
+    ``B_per_t[L]`` is (n_t, 6, D). Returns {L: flat (n_tok*D,)} consumable by ``_apply_edit``. The masks
+    encode WHERE (trajectory geometry); B encodes WHAT (velocity->channel). No H_b is used.
+    """
+    n_t = grid[0]; n_tok = grid[1] * grid[2]
+    phi = vo.transport_features(M_a, M_b, va, vb, grid)   # (n_tok*n_t, 6)
+    out = {}
+    for L in layers:
+        D = B_per_t[L].shape[2]
+        flat = np.empty((phi.shape[0], D))
+        for t in range(n_t):
+            sl = slice(t * n_tok, (t + 1) * n_tok)
+            flat[sl] = phi[sl] @ B_per_t[L][t]
+        out[L] = flat.reshape(-1)
+    return out
+
+
 @torch.no_grad()
 def _decode_vel(decoder, latents, grid, want_frames=False):
     out = decoder(latents, grid)
@@ -99,6 +118,10 @@ def main() -> None:
                    help="direction-conditioned canonicalized operator: n_bins values to test (needs "
                         "fit_dir_operator.py artifacts; empty string to skip)")
     p.add_argument("--num_scenes", type=int, default=30)
+    p.add_argument("--transport_sigma", type=float, default=0.0,
+                   help="Gaussian mask width for the transport operator; 0 = read from transport_meta.json")
+    p.add_argument("--cmd_scales", default="1.0,1.5,2.0,2.5,3.0",
+                   help="gain sweep for cmd_U8 (ridge shrinks magnitude; gain corrects it)")
     p.add_argument("--device", default="cuda")
     p.add_argument("overrides", nargs="*")
     args = p.parse_args()
@@ -122,6 +145,35 @@ def main() -> None:
     rng = np.random.default_rng(0)
     Rbasis = {L: {k: vo.random_basis(Bt[L].shape[1], k, rng) for k in ks} for L in layers}
 
+    # masked trajectory-transport operator (fit_transport_operator.py artifacts), if present.
+    # transport_B_L*.npy is per-temporal-token B (n_t, 6, D); we steer command-only (no H_b) by building
+    # the source mask from clip-a's geometry and the target mask by forward-sim from (start, v_b).
+    Bt_transport = {}      # {L: (n_t, 6, D)}
+    have_transport = False
+    try:
+        Bt_transport = {L: np.load(art / f"transport_B_L{L}.npy").astype(np.float64) for L in layers}
+        have_transport = True
+        tsigma = args.transport_sigma
+        if tsigma <= 0:  # default to the sigma the operator was fit at
+            try:
+                tsigma = float(json.loads((art / "transport_meta.json").read_text())["saved_sigma"])
+            except (FileNotFoundError, KeyError):
+                tsigma = 1.0
+        print(f"[steer2d] loaded transport operator (per-t B), sigma={tsigma}, layers {layers}")
+    except FileNotFoundError:
+        print("[steer2d] no transport-operator artifacts; skipping transport methods")
+
+    # command-only subspace-synthesis operators (fit_command_operators.py artifacts), if present.
+    # W_U: command_features -> U8 coords (reconstruct edit = coords @ U8); B_rich: rich command -> full dH.
+    Wu = {}; Brich = {}; have_cmd = False
+    try:
+        Wu = {L: np.load(art / f"cmd_Wu_L{L}.npy").astype(np.float64) for L in layers}
+        Brich = {L: np.load(art / f"cmd_Brich_L{L}.npy").astype(np.float64) for L in layers}
+        have_cmd = True
+        print(f"[steer2d] loaded command operators (W_U, B_rich) for layers {layers}")
+    except FileNotFoundError:
+        print("[steer2d] no command-operator artifacts; skipping cmd_U8 / ridge_rich methods")
+
     # direction-conditioned canonicalized operator (fit_dir_operator.py artifacts), if present
     dir_bins = [int(x) for x in args.dir_bins.split(",") if x.strip()]
     Bt_dir = {}  # {N: {b: {L: (2,D)}}}
@@ -144,10 +196,18 @@ def main() -> None:
         decoder.prime_layers([int(x) for x in ds.available_layers()])
     load_checkpoint(args.checkpoint, decoder, map_location=device)
 
-    methods = ["full_delta", "ridge_global", "canon_ridge"] + \
-              [f"dircanon{N}" for N in dir_bins] + \
+    transport_methods = ["transport", "transport_oracle", "transport_shuffle"] if have_transport else []
+    cmd_scales = [float(x) for x in args.cmd_scales.split(",") if x.strip()]
+    cmd_methods = ([f"cmd_U8_s{g:g}" for g in cmd_scales] + ["ridge_rich"]) if have_cmd else []
+    # ridge_projU8 needs only the always-loaded ridge B + U basis; hybrid needs transport
+    synth_methods = ["ridge_projU8"] + (["hybrid_tr_ridge"] if have_transport else [])
+    methods = ["full_delta", "ridge_global", "canon_ridge"] + synth_methods + cmd_methods + \
+              transport_methods + [f"dircanon{N}" for N in dir_bins] + \
               [f"subspace_U{k}" for k in ks] + [f"random{k}" for k in ks]
     decoded = {m: [] for m in methods}
+    # shuffle control: derange scene ids so transport_shuffle uses ANOTHER scene's geometry (wrong
+    # placement) with this scene's velocities — isolates whether correct geometry is what helps.
+    shuf = {s: scene_ids[(i + 1) % len(scene_ids)] for i, s in enumerate(scene_ids)}
     targets = []
     per_scene = {}
 
@@ -167,7 +227,46 @@ def main() -> None:
             "full_delta": dH,
             "ridge_global": {L: dv @ Bt[L] for L in layers},
             "canon_ridge": {L: vo.roll_layer(dv @ Bt_canon[L], grid, (-sh[0], -sh[1])) for L in layers},
+            # denoise the command ridge into the decoder-friendly global subspace U8 (free; no refit)
+            "ridge_projU8": {L: vo.project(dv @ Bt[L], Ubasis[L][:8]) for L in layers},
         }
+        if have_cmd:
+            phi = vo.command_features(va, vb)                       # (13,)
+            # cmd_U8: synthesize the edit straight in U8 from the command (targets the 21deg ceiling).
+            # Ridge shrinks the predicted coord magnitude, so sweep a global gain to undo the shrinkage.
+            cU8 = {L: (phi @ Wu[L]) @ Ubasis[L][:8] for L in layers}
+            for g in cmd_scales:
+                edits[f"cmd_U8_s{g:g}"] = {L: g * cU8[L] for L in layers}
+            edits["ridge_rich"] = {L: phi @ Brich[L] for L in layers}
+        if have_transport:
+            n_t = grid[0]
+            pa = vo.clip_positions(sa)                      # clip-a per-frame centers (known at test)
+            ca = vo.temporal_token_centers(pa, n_t)
+            M_a = vo.gaussian_mask(ca, grid, tsigma)
+            # deployable target mask: forward-sim the trajectory from (start, v_b) — no H_b
+            cb_sim = vo.temporal_token_centers(vo.forward_sim_positions(pa[0], vb, pa.shape[0]), n_t)
+            M_b_dep = vo.gaussian_mask(cb_sim, grid, tsigma)
+            # oracle target mask: clip-b's true per-frame centers (upper bound on geometry)
+            cb_orc = vo.temporal_token_centers(vo.clip_positions(sb), n_t)
+            M_b_orc = vo.gaussian_mask(cb_orc, grid, tsigma)
+            edits["transport"] = _transport_edit(Bt_transport, M_a, M_b_dep, va, vb, grid, layers)
+            edits["transport_oracle"] = _transport_edit(Bt_transport, M_a, M_b_orc, va, vb, grid, layers)
+            # shuffle control: same va,vb but masks from another scene's geometry (wrong placement)
+            so = ds[scenes[shuf[s]][sorted(scenes[shuf[s]])[0]]]
+            pa_o = vo.clip_positions(so)
+            M_a_sh = vo.gaussian_mask(vo.temporal_token_centers(pa_o, n_t), grid, tsigma)
+            M_b_sh = vo.gaussian_mask(
+                vo.temporal_token_centers(vo.forward_sim_positions(pa_o[0], vb, pa_o.shape[0]), n_t),
+                grid, tsigma)
+            edits["transport_shuffle"] = _transport_edit(Bt_transport, M_a_sh, M_b_sh, va, vb, grid, layers)
+            # hybrid: keep the global command term (the decoder needs it) + add local placement on top
+            edits["hybrid_tr_ridge"] = {L: edits["transport"][L] + dv @ Bt[L] for L in layers}
+            if n < 6:  # mask-overlay sanity figure on the GT target frame
+                try:
+                    viz.transport_mask_overlay(sb["frames"], M_a, M_b_dep,
+                                               out / f"scene{s:05d}_masks.png")
+                except Exception as e:  # noqa: BLE001
+                    print(f"  [warn] mask overlay scene{s:05d} failed: {e}")
         for N in dir_bins:
             bidx = vo.direction_bin(vb, N)   # condition on TARGET heading
             edits[f"dircanon{N}"] = {
@@ -181,7 +280,7 @@ def main() -> None:
         sc_row = {"v_a": va.tolist(), "v_b": vb.tolist()}
         for m in methods:
             Hstar = _apply_edit(Ha, edits[m], grid, device)
-            want = m in ("full_delta", "ridge_global", "canon_ridge") and n < 6
+            want = m in ("full_delta", "ridge_global", "transport") and n < 6
             meas, fr = _decode_vel(decoder, Hstar, grid, want_frames=want)
             decoded[m].append([meas["vel_x"], meas["vel_y"]])
             sc_row[m] = [round(meas["vel_x"], 5), round(meas["vel_y"], 5)]
@@ -195,10 +294,11 @@ def main() -> None:
                     out / f"scene{s:05d}_methods.png")
             except Exception as e:  # noqa: BLE001
                 print(f"  [warn] filmstrip scene{s:05d} failed: {e}")
+        tp = (f" transport={tuple(round(x,4) for x in decoded['transport'][-1])}"
+              if have_transport else "")
         print(f"  scene{s:05d}: v_b=({vb[0]:.4f},{vb[1]:.4f}) "
               f"full={tuple(round(x,4) for x in decoded['full_delta'][-1])} "
-              f"ridge={tuple(round(x,4) for x in decoded['ridge_global'][-1])} "
-              f"canon={tuple(round(x,4) for x in decoded['canon_ridge'][-1])}")
+              f"ridge={tuple(round(x,4) for x in decoded['ridge_global'][-1])}{tp}")
 
     results = {m: _agg(decoded[m], targets) for m in methods}
     summary = {"test_dir": args.test_dir, "checkpoint": args.checkpoint, "layers": layers,

@@ -287,6 +287,44 @@ def steering_filmstrip(
     return path
 
 
+def transport_mask_overlay(frames, M_a: np.ndarray, M_b: np.ndarray, path: str | Path,
+                           n_show: int = 8) -> Path:
+    """Sanity figure: source/target trajectory masks overlaid on the (upsampled) ball frames.
+
+    ``frames`` is ``(T_frames, C, H, W)`` (GT target clip); ``M_a``, ``M_b`` are ``(T_tok, Hp, Wp)`` soft
+    masks. Each temporal token t spans frames 2t,2t+1, so we overlay token t on frame 2t. Red = source
+    mask M_a, blue = target mask M_b — they should sit on the ball and its forward-simulated path.
+    """
+    import torch  # local: keep module import-light
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(frames, torch.Tensor):
+        fr = frames.detach().cpu().float().clamp(0, 1).permute(0, 2, 3, 1).numpy()
+    else:
+        fr = np.asarray(frames)
+        if fr.ndim == 4 and fr.shape[1] in (1, 3):  # (T,C,H,W) -> (T,H,W,C)
+            fr = np.transpose(fr, (0, 2, 3, 1))
+    T_tok = M_a.shape[0]
+    t = min(n_show, T_tok)
+    fig, axes = plt.subplots(1, t, figsize=(1.7 * t, 1.9))
+    if t == 1:
+        axes = [axes]
+    H, W = fr.shape[1], fr.shape[2]
+    for i in range(t):
+        ax = axes[i]
+        ax.imshow(fr[min(2 * i, fr.shape[0] - 1)])
+        for M, color in ((M_a, "Reds"), (M_b, "Blues")):
+            up = np.kron(M[i], np.ones((H // M.shape[1], W // M.shape[2])))
+            ax.imshow(up, cmap=color, alpha=0.45 * (up / (up.max() + 1e-9)), vmin=0, vmax=1)
+        ax.axis("off"); ax.set_title(f"t={i}", fontsize=8)
+    fig.suptitle("transport masks: source=red, target=blue", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def cka_heatmap(matrix: np.ndarray, labels: list[str], path: str | Path, title: str = "CKA") -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

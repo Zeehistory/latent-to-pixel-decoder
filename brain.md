@@ -333,6 +333,43 @@ show the principle transfers/generalizes rather than overfitting one model.
 
 ## Changelog
 
+- **2026-06-29** — Step 2 COMMAND-ONLY VELOCITY STEERING SOLVED via SUBSPACE SYNTHESIS (PI direction
+  2026-06-29: "give the operator the trajectory geometry"). The PI proposed a masked trajectory-transport
+  operator: build soft Gaussian masks on the (8×16×16) token grid from GT ball centers (source M_a,
+  target M_b forward-simulated from start+v_b — exact since v2d is constant-velocity/no-bounce, so NO H_b
+  needed), and learn a per-(layer,temporal-token) ridge mapping mask-weighted velocity features → ΔH.
+  Built it cleanly: `velocity_ops.{clip_positions,temporal_token_centers,forward_sim_positions,
+  gaussian_mask,transport_features,LinearLS,command_features}`, `scripts/fit_transport_operator.py`,
+  `scripts/fit_command_operators.py`, transport/cmd methods in `scripts/steer_velocity2d.py`,
+  `tests/test_transport_operator.py` (8 green incl. forward-sim==GT to <1e-6 + round-trip). Key modeling
+  fix en route: the bias-free `mask*(v@B)` form collapsed (decode≈no-op) because near-ball ΔH is dominated
+  by velocity-INDEPENDENT PRESENCE (a disk appears/disappears); added mask-gated presence-bias columns
+  (feature 6→8). **Headline (40 held-out test scenes, decode→track 2D velocity-vector angle err; ceiling
+  full_delta=1.66°, command-only baseline ridge_global=34.4°, no-op floor≈44°):**
+    - **TRANSPORT (placement) = clean NEGATIVE: 42.8°, and transport≈transport_shuffle(41.5°)≈no-op.**
+      Putting the edit on the CORRECT trajectory tokens is no better than a RANDOM other scene's tokens →
+      the decoder does NOT read velocity from the ball's spatial tokens. WHERE was not the missing
+      ingredient. (Latent gate looked positive — localized cos 0.68 — but DECODE is the truth; placement
+      is real in latents, inert in pixels.)
+    - **Mechanism:** `subspace_U8` (project TRUE ΔH onto global PCA U) decodes at 21.3° ≫ ridge 34°, and
+      `ridge_projU8`≈ridge → velocity lives in a GLOBAL low-rank subspace U; the 34→21° gap is a pure
+      SYNTHESIS gap (predict U's coords from the command), not placement.
+    - **FIX — `cmd_U8`: regress command_features→U8 coordinates, reconstruct Uᵀc, ×gain. COMMAND-ONLY
+      (no H_b) → 6.1° at gain 2.0** (clean convex gain curve 25.9/14.7/**6.1**/8.8/16.4° at ×1/1.5/2/2.5/3;
+      ridge shrinks coord magnitude, the global gain undoes it — partly compensating for the off-U energy
+      cmd_U8 drops, so the gain must be set against the DECODE objective, not a latent magnitude match).
+      **PRINCIPLED & leakage-free (100 scenes, gain calibrated on 50 val by decode angle err →2.25,
+      reported on 50 disjoint test): 6.94°** vs ridge 34.8° / subspace_U8 20.4° (needs H_b) /
+      full_delta 1.9°. Convex gain basin (100-scene sweep): 14.7/9.1/5.9/6.0/9.3° at ×1.5/1.75/2/2.25/2.5.
+      Reproducible via `scripts/calibrate_cmd_gain.py`. `ridge_rich` (richer command features, no
+      subspace) = 24.7°, also beats ridge.
+    So: a command-only operator finally BREAKS the 34° plateau (~5×, to ~7°), beating even the
+    counterfactual `subspace_U8` — by SYNTHESIZING the edit inside the global velocity subspace, not by
+    placing it. Artifacts: `outputs/analysis/moving_ball_v2d/subspace/{cmd_Wu_L*,cmd_Brich_L*,transport_B_L*}.npy`,
+    `.../steer_{final,sweep}/steer2d_summary.json`. Infra: added `scripts/_pick_partition.sh` (queue-aware
+    partition picker — user directive: always avoid backlogged partitions) + `_fit_{transport,command}.sh`.
+    See [[velocity-subspace-operator-plan]], [[cluster-partition-playbook]].
+
 - **2026-06-28 (pm)** — Step 2 VELOCITY↔NUISANCE DISENTANGLEMENT → POSITIVE. Encoded the colour +
   background nuisance train caches (size already cached), computed top-8 PCA subspaces of the same-scene
   ΔH for each factor (velocity from the v2d global basis), and measured mean principal angles between the
