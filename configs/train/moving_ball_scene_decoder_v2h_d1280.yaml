@@ -1,0 +1,87 @@
+# ViT-H ablation: decoder hidden_dim matches encoder (1280, no latent_proj bottleneck).
+encoder:
+  name: vjepa2
+  hf_model_id: facebook/vjepa2-vith-fpc64-256
+  hidden_dim: 1280
+  num_layers: 32
+  num_heads: 16
+  patch_size: 16
+  tubelet_size: 2
+  image_size: 256
+  num_frames: 16
+  frozen: true
+  layers: [8, 16, 24, 31]
+
+decoder:
+  name: transformer
+  mode: reconstruct
+  hidden_dim: 1280
+  depth: 12
+  heads: 16
+  mlp_ratio: 4.0
+  dropout: 0.0
+  num_query_tokens_per_frame: 256
+  use_layer_embedding: true
+  gradient_checkpointing: true
+  out_image_size: 256
+  out_num_frames: 16
+  out_channels: 3
+
+data:
+  name: moving_ball
+  root: null
+  image_size: 256
+  num_frames: 16
+  fps: 4
+  scenario: scene_velocity2d
+  clips_per_scene: 8
+  categories: all
+  split: train
+  num_clips: 4000
+  speed_range: [0.012, 0.026]
+  radius_range: [0.11, 0.11]
+  seed: 0
+
+loss:
+  target_lo: 0.05
+  target_hi: 0.95
+  charbonnier: 0.1
+  foreground: 1.0
+  foreground_gamma: 1.0
+  ssim: 0.2
+  ms_ssim: 0.2
+  lpips: 0.0
+  temporal_consistency: 0.25
+  state: 1.0
+  trajectory: 5.0
+  velocity: 5.0
+  frame_position: 20.0
+  frame_spread: 2.0
+  frame_spread_max_var: 0.004
+
+optim:
+  lr: 5.0e-4
+  weight_decay: 0.05
+  betas: [0.9, 0.999]
+  warmup_steps: 100
+  max_steps: 8000
+  scheduler: cosine
+  grad_accum: 8
+  grad_clip: 1.0
+  ema_decay: 0.9999
+
+train:
+  batch_size: 1
+  num_workers: 0
+  mixed_precision: bf16
+  log_every: 50
+  ckpt_every: 500
+  eval_every: 100000
+  seed: 0
+  deterministic: false
+  resume: null
+
+output_dir: outputs/runs/moving_ball_scene_v2d_decoder_fp_v2h_d1280
+latent_dir: outputs/latents/moving_ball_scene_v2d/train/vjepa2_huge
+wandb: false
+tags: [moving_ball, scene_velocity2d, vjepa2, vit_h_32, decoder_depth12, decoder_d1280, diff_steering]

@@ -69,12 +69,12 @@ J_CMD=$(sbatch --parsable --partition="$CPU_PART" --mem=320G \
 
 if [ "$SERIAL_GPU" = "1" ]; then
     # Decoder train also waits for test extract so only one GPU job runs at a time.
-    J_TRAIN=$(sbatch --parsable --partition="$GPU_PART" --mem=320G \
+    J_TRAIN=$(sbatch --parsable --partition="$GPU_PART" --mem="$TRAIN_MEM" \
         --export=ALL,ENCODER="$ENCODER",BASE_DIR="$BASE_DIR",MAX_STEPS="${MAX_STEPS:-8000}" \
         --dependency=afterok:"$J_TEST_EX" \
         "$SCRIPT_DIR/train_decoder.sh")
 else
-    J_TRAIN=$(sbatch --parsable --partition="$GPU_PART" --mem=320G \
+    J_TRAIN=$(sbatch --parsable --partition="$GPU_PART" --mem="$TRAIN_MEM" \
         --export=ALL,ENCODER="$ENCODER",BASE_DIR="$BASE_DIR",MAX_STEPS="${MAX_STEPS:-8000}" \
         --dependency=afterok:"$J_TRAIN_EX" \
         "$SCRIPT_DIR/train_decoder.sh")

@@ -12,14 +12,14 @@ BASE_DIR=${BASE_DIR:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/..
 
 case "$ENCODER" in
   vjepa2_large)
-    ENCODER_LAYERS="6,12,18,23"
-    TRAIN_CONFIG="configs/train/moving_ball_scene_decoder.yaml"
-    EXTRACT_BATCH=8
+    ENCODER_LAYERS=${ENCODER_LAYERS:-6,12,18,23}
+    TRAIN_CONFIG=${TRAIN_CONFIG:-configs/train/moving_ball_scene_decoder.yaml}
+    EXTRACT_BATCH=${EXTRACT_BATCH:-8}
   ;;
   vjepa2_huge)
-    ENCODER_LAYERS="8,16,24,31"
-    TRAIN_CONFIG="configs/train/moving_ball_scene_decoder_v2h.yaml"
-    EXTRACT_BATCH=4
+    ENCODER_LAYERS=${ENCODER_LAYERS:-8,16,24,31}
+    TRAIN_CONFIG=${TRAIN_CONFIG:-configs/train/moving_ball_scene_decoder_v2h.yaml}
+    EXTRACT_BATCH=${EXTRACT_BATCH:-4}
   ;;
   *)
     echo "unknown ENCODER=$ENCODER (vjepa2_large|vjepa2_huge)" >&2
@@ -33,10 +33,16 @@ LATENT_TEST="$LATENT_ROOT/test/$ENCODER"
 
 ANALYSIS_ROOT="$BASE_DIR/outputs/analysis/moving_ball_v2d_${ENCODER}"
 SUBSPACE_DIR="$ANALYSIS_ROOT/subspace"
-STEER_DIR="$ANALYSIS_ROOT/steer"
+STEER_DIR=${STEER_DIR:-$ANALYSIS_ROOT/steer}
 
-RUN_ROOT="$BASE_DIR/outputs/runs/moving_ball_scene_v2d_decoder_fp_${ENCODER}"
+RUN_ROOT=${RUN_ROOT:-$BASE_DIR/outputs/runs/moving_ball_scene_v2d_decoder_fp_${ENCODER}}
 CKPT="$RUN_ROOT/checkpoints/last.pt"
+
+# Decoder train RAM: 1024-d ViT-H fit at 320G; 1280-d needs more (pass via sbatch --mem=$TRAIN_MEM).
+case "${TRAIN_CONFIG}" in
+  *d1280*) TRAIN_MEM=${TRAIN_MEM:-384G} ;;
+  *)       TRAIN_MEM=${TRAIN_MEM:-320G} ;;
+esac
 
 MAX_STEPS=${MAX_STEPS:-8000}
 NUM_SCENES=${NUM_SCENES:-40}

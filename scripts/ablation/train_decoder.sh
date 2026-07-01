@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=320G
+# d1280 decoder: sbatch --mem=384G (or source _encoder_env.sh and use --mem=$TRAIN_MEM)
 #SBATCH --time=12:00:00
 #SBATCH --signal=B:USR1@150
 #SBATCH --open-mode=append
