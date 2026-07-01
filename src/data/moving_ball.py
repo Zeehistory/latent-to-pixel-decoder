@@ -42,6 +42,11 @@ Variants (selected by ``scenario``):
   fixed across its ranks while VARYING across scenes. ``H_b - H_a`` still cancels appearance within a
   scene; the test is whether the global velocity subspace + linear command map (cmd-U8) survive
   heterogeneous appearance across scenes.
+* ``scene_restitution`` — **coefficient-of-restitution** scene dataset for bounce steering. Within a
+  scene all ranks share identical frame-0 geometry (start position, incoming velocity, radius) and differ
+  **only** in wall restitution ``e`` (rank 0 = least bouncy .. K-1 = most). Trajectories are identical
+  until the first bottom-wall bounce, then diverge — the same-scene difference ``H_b - H_a`` isolates the
+  restitution factor for on-manifold latent arithmetic / command operators.
 * ``occlusion`` — a static vertical wall in the middle of the frame; the ball passes *behind* it and is
   invisible for the middle frames. Tests whether velocity is still decodable while the ball is hidden
   (object-permanence / physical-state evidence).
@@ -163,6 +168,7 @@ class MovingBall:
         camera_rotation: bool = False,
         ball_color: tuple[float, float, float] = (0.15, 0.15, 0.15),
         clips_per_scene: int = 4,
+        restitution_range: tuple[float, float] = (0.35, 0.95),
         shape: str = "disk",
         seed: int = 0,
     ) -> None:
@@ -172,6 +178,7 @@ class MovingBall:
         self.fps = fps
         self.scenario = scenario
         self.speed_range = speed_range
+        self.restitution_range = restitution_range
         self.radius_range = radius_range
         self.fixed_speed = fixed_speed
         self.camera_rotation = camera_rotation
@@ -188,6 +195,8 @@ class MovingBall:
             return self._scene_velocity2d(index)
         if self.scenario == "scene_velocity2d_mixed":
             return self._scene_velocity2d_mixed(index)
+        if self.scenario == "scene_restitution":
+            return self._scene_restitution(index)
         if self.scenario == "scene_size":
             return self._scene_nuisance(index, "scene_size")
         if self.scenario == "scene_color":
@@ -367,6 +376,70 @@ class MovingBall:
                               color=color, bg_color=bg_color,
                               scene_velocities=[[float(v[0]), float(v[1])] for v in vels])
 
+    def _bounce_frame_index(self, pos0: np.ndarray, vel: np.ndarray, radius: float) -> int | None:
+        """Frame index (0-based) when the ball center first reaches the bottom wall, or None."""
+        lo, hi = radius, 1.0 - radius
+        pos = pos0.astype(np.float64).copy()
+        for t in range(self.num_frames):
+            pos = pos + vel
+            if pos[0] < lo or pos[0] > hi or pos[1] < lo:
+                return None
+            if pos[1] >= hi - 1e-9:
+                return t
+        return None
+
+    def _sample_bounce_scene(
+        self, srng: np.random.Generator, radius: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample (pos0, incoming vel) so the ball hits the bottom wall mid-clip and stays in frame."""
+        lo, hi = radius, 1.0 - radius
+        for _ in range(800):
+            speed = float(srng.uniform(*self.speed_range))
+            # Mostly downward with a small horizontal component.
+            ang = float(srng.uniform(-np.pi / 2 - 0.35, -np.pi / 2 + 0.35))
+            vel = speed * np.array([np.cos(ang), np.sin(ang)])
+            pos0 = np.array([
+                float(srng.uniform(lo + 0.12, hi - 0.12)),
+                float(srng.uniform(lo + 0.05, 0.38)),
+            ])
+            total = vel * (self.num_frames - 1)
+            x_lo = max(lo, lo - total[0])
+            x_hi = min(hi, hi - total[0])
+            if x_hi <= x_lo + 1e-6:
+                continue
+            pos0[0] = float(np.clip(pos0[0], x_lo, x_hi))
+            t_hit = self._bounce_frame_index(pos0, vel, radius)
+            if t_hit is not None and 3 <= t_hit <= self.num_frames - 5:
+                return pos0, vel
+        # Degenerate fallback: straight drop from centre-top.
+        vel = np.array([0.0, -float(self.speed_range[1])])
+        return np.array([0.5, 0.25]), vel
+
+    def _scene_restitution(self, index: int) -> BallClip:
+        """One clip of a *restitution* scene: shared incoming trajectory, only ``e`` varies across ranks.
+
+        Rank 0 is the least bouncy (lowest ``e``), rank ``K-1`` the most. Frame 0 is bit-identical across
+        ranks because restitution only affects the post-bounce dynamics.
+        """
+        K = self.clips_per_scene
+        scene = index // K
+        rank = index % K
+        srng = np.random.default_rng(self.seed * 100_003 + 7919 * (scene + 1))
+        radius = float(srng.uniform(*self.radius_range))
+        pos0, vel_in = self._sample_bounce_scene(srng, radius)
+        lo_e, hi_e = self.restitution_range
+        restitutions = np.sort(srng.uniform(lo_e, hi_e, size=K))
+        for j in range(1, K):
+            min_gap = 0.35 * (hi_e - lo_e) / K
+            if restitutions[j] - restitutions[j - 1] < min_gap:
+                restitutions[j] = min(hi_e, restitutions[j - 1] + min_gap)
+        e = float(restitutions[rank])
+        return self._roll_out_bounce(
+            pos0, vel_in, radius, e, scenario="scene_restitution", index=index,
+            scene=scene, rank=rank,
+            scene_restitutions=[float(x) for x in restitutions],
+        )
+
     # nuisance-factor ramp endpoints (held dark/light enough that the darkness>0.5 tracker still
     # finds the ball: every ball stays clearly darker than every background).
     _COLOR_LO = (0.10, 0.10, 0.45)   # dark blue  (rank 0)
@@ -536,6 +609,98 @@ class MovingBall:
             meta["occluder"] = list(occluder)
             n_hidden = int(sum(1 for r in states if r[_BALL_KEYS.index("visible")] == 0.0))
             meta["n_hidden_frames"] = n_hidden
+        return BallClip(
+            frames=torch.from_numpy(frame_arr).float(),
+            state=torch.tensor(states, dtype=torch.float32),
+            state_keys=keys,
+            meta=meta,
+        )
+
+    def _roll_out_bounce(
+        self,
+        pos0: np.ndarray,
+        vel_in: np.ndarray,
+        radius: float,
+        restitution: float,
+        scenario: str,
+        index: int,
+        scene: int,
+        rank: int,
+        scene_restitutions: list[float],
+        color: tuple[float, float, float] | None = None,
+        bg_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    ) -> BallClip:
+        """Integrate a ball with bottom/side wall bounces; coefficient of restitution ``e`` on normals."""
+        color = tuple(self.ball_color) if color is None else tuple(color)
+        lo, hi = radius, 1.0 - radius
+        keys = _state_keys()
+        frames: list[np.ndarray] = []
+        states: list[list[float]] = []
+        pos = pos0.astype(np.float64).copy()
+        vel = vel_in.astype(np.float64).copy()
+        prev_vel = vel.copy()
+        bounce_frame = -1
+        pre_bounce_speed = float(np.linalg.norm(vel_in))
+        post_bounce_speed = float("nan")
+
+        for t in range(self.num_frames):
+            speed = float(np.linalg.norm(vel))
+            angle = float(np.arctan2(vel[1], vel[0])) if speed > 1e-9 else 0.0
+            acc = vel - prev_vel
+            frames.append(_render(pos, radius, self.image_size, color, True,
+                                  None, 0.0, bg_color=bg_color, shape=self.shape))
+            row = [
+                float(pos[0]), float(pos[1]), float(vel[0]), float(vel[1]),
+                float(acc[0]), float(acc[1]),
+                float(radius), speed, angle, 1.0,
+            ]
+            row.extend([0.0, 0.0])
+            states.append(row)
+
+            collision = 0.0
+            pos = pos + vel
+            if pos[1] > hi:
+                pos[1] = hi
+                if vel[1] > 0:
+                    vel[1] = -vel[1] * restitution
+                    collision = 1.0
+                    if bounce_frame < 0:
+                        bounce_frame = t
+                        post_bounce_speed = float(np.linalg.norm(vel))
+            if pos[0] < lo:
+                pos[0] = lo
+                if vel[0] < 0:
+                    vel[0] = -vel[0] * restitution
+                    collision = 1.0
+            elif pos[0] > hi:
+                pos[0] = hi
+                if vel[0] > 0:
+                    vel[0] = -vel[0] * restitution
+                    collision = 1.0
+            if collision:
+                states[-1][-1] = 1.0  # collision_event on the frame before the bounce step
+            prev_vel = vel.copy()
+
+        frame_arr = np.stack(frames, 0).transpose(0, 3, 1, 2)
+        speed_ratio = (
+            post_bounce_speed / (pre_bounce_speed + 1e-9)
+            if np.isfinite(post_bounce_speed) else float("nan")
+        )
+        rebound_peak_y = float("nan")
+        if bounce_frame >= 0:
+            ys = [states[t][1] for t in range(bounce_frame + 1, len(states))]
+            rebound_peak_y = float(min(ys)) if ys else float("nan")
+        meta = {
+            "scenario": scenario, "index": index, "fps": self.fps, "radius": radius,
+            "restitution": restitution, "incoming_vel_x": float(vel_in[0]),
+            "incoming_vel_y": float(vel_in[1]), "incoming_speed": pre_bounce_speed,
+            "bounce_frame": int(bounce_frame), "post_bounce_speed": post_bounce_speed,
+            "speed_ratio": float(speed_ratio), "rebound_peak_y": rebound_peak_y,
+            "image_size": self.image_size, "num_frames": self.num_frames, "num_objects": 1,
+            "scene": int(scene), "rank": int(rank), "clips_per_scene": self.clips_per_scene,
+            "scene_restitutions": scene_restitutions,
+            "ball_color": list(color), "bg_color": list(bg_color),
+        }
         return BallClip(
             frames=torch.from_numpy(frame_arr).float(),
             state=torch.tensor(states, dtype=torch.float32),

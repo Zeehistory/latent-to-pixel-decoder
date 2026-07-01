@@ -57,3 +57,80 @@ def measured_velocity(frames: torch.Tensor, darkness_thresh: float = 0.5) -> dic
         "vel_x": float(v[0]), "vel_y": float(v[1]),
         "speed": float(np.linalg.norm(v)), "n_valid": int(valid.sum()),
     }
+
+
+def measured_bounce(
+    frames: torch.Tensor,
+    darkness_thresh: float = 0.5,
+    incoming_hint: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Empirical bounce metrics from decoded frames.
+
+    Finds the first downward-then-upward vertical velocity sign change as the bounce, then reports:
+    ``speed_ratio`` (post-bounce speed / pre-bounce speed), ``rebound_peak_y`` (minimum y after bounce,
+    i.e. highest point on screen), and ``post_bounce_speed``. ``incoming_hint`` may supply
+    ``bounce_frame`` from GT to align timing when the tracker is noisy.
+    """
+    c = ball_centroids(frames, darkness_thresh)
+    if np.isnan(c).all():
+        return _empty_bounce()
+
+    disp = np.diff(c, axis=0)
+    valid = ~np.isnan(disp).any(axis=1)
+    if valid.sum() < 3:
+        return _empty_bounce()
+
+    vy = disp[:, 1]
+    vx = disp[:, 0]
+    speeds = np.linalg.norm(disp, axis=1)
+
+    bounce_idx = -1
+    hint = int(incoming_hint.get("bounce_frame", -1)) if incoming_hint else -1
+    if 0 <= hint < len(vy) - 1:
+        bounce_idx = hint
+    else:
+        for i in range(1, len(vy)):
+            if not valid[i - 1] or not valid[i]:
+                continue
+            if vy[i - 1] < -1e-5 and vy[i] > 1e-5:
+                bounce_idx = i
+                break
+
+    if bounce_idx < 1:
+        return _empty_bounce(n_valid=int(valid.sum()))
+
+    pre = speeds[max(0, bounce_idx - 2):bounce_idx]
+    post = speeds[bounce_idx:min(len(speeds), bounce_idx + 3)]
+    pre = pre[np.isfinite(pre)]
+    post = post[np.isfinite(post)]
+    pre_sp = float(np.mean(pre)) if len(pre) else float("nan")
+    post_sp = float(np.mean(post)) if len(post) else float("nan")
+    ratio = post_sp / (pre_sp + 1e-9) if np.isfinite(pre_sp) and pre_sp > 1e-6 else float("nan")
+
+    post_y = c[bounce_idx + 1 :]
+    post_y = post_y[~np.isnan(post_y[:, 1]), 1] if len(post_y) else np.array([])
+    peak_y = float(np.min(post_y)) if len(post_y) else float("nan")
+
+    post_v = disp[bounce_idx: bounce_idx + 2]
+    post_v = post_v[~np.isnan(post_v).any(axis=1)]
+    pv = post_v.mean(axis=0) if len(post_v) else np.array([float("nan"), float("nan")])
+
+    return {
+        "speed_ratio": float(ratio),
+        "post_bounce_speed": post_sp,
+        "incoming_speed": pre_sp,
+        "rebound_peak_y": peak_y,
+        "bounce_frame": int(bounce_idx),
+        "post_vel_x": float(pv[0]) if len(pv) else float("nan"),
+        "post_vel_y": float(pv[1]) if len(pv) else float("nan"),
+        "n_valid": int(valid.sum()),
+    }
+
+
+def _empty_bounce(n_valid: int = 0) -> dict[str, float]:
+    nan = float("nan")
+    return {
+        "speed_ratio": nan, "post_bounce_speed": nan, "incoming_speed": nan,
+        "rebound_peak_y": nan, "bounce_frame": -1,
+        "post_vel_x": nan, "post_vel_y": nan, "n_valid": n_valid,
+    }

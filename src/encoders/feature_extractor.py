@@ -148,6 +148,8 @@ def extract_latents(
                 "state_keys": batch["state_keys"],
                 "category": batch["category"][i],
             }
+            if "meta" in batch:
+                payload["meta"] = batch["meta"][i]
             record = {
                 "id": batch["id"][i],
                 "category": batch["category"][i],
@@ -248,6 +250,7 @@ class LatentDataset(Dataset):
             "state_mask": payload["state_mask"],
             "state_keys": payload["state_keys"],
             "category": self._category.get(sid) or payload["category"],
+            **({"meta": payload["meta"]} if "meta" in payload else {}),
         }
 
 

@@ -81,6 +81,7 @@ class DataConfig:
     fixed_speed: float = 0.022
     camera_rotation: bool = False
     clips_per_scene: int = 4  # scene_velocity: clips per scene (shared first frame, only speed varies)
+    restitution_range: Any = field(default_factory=lambda: [0.35, 0.95])
     shape: str = "disk"  # rendered object: "disk" (default) or "square" (cross-object control)
 
 

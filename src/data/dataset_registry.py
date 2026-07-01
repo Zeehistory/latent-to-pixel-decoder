@@ -127,6 +127,7 @@ class MovingBallDataset(Dataset):
             fixed_speed=float(getattr(cfg, "fixed_speed", 0.022)),
             camera_rotation=bool(getattr(cfg, "camera_rotation", False)),
             clips_per_scene=int(getattr(cfg, "clips_per_scene", 4)),
+            restitution_range=tuple(getattr(cfg, "restitution_range", [0.35, 0.95])),
             shape=str(getattr(cfg, "shape", "disk")),
             seed=cfg.seed,
         )
